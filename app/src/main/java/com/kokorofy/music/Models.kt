@@ -17,4 +17,22 @@ data class Song(
     val createdAt: String? = null
 )
 
+@Entity(tableName = "playlists")
+data class Playlist(
+    @PrimaryKey val id: String,
+    val name: String,
+    val coverUrl: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "playlist_songs", primaryKeys = ["playlistId", "songId"])
+data class PlaylistSong(
+    val playlistId: String,
+    val songId: String,
+    val position: Int = 0
+)
+
 data class LyricsResult(val synced: String?, val plain: String?)
+
+/** Línea de letra sincronizada (LRC). */
+data class LyricLine(val timeMs: Long, val text: String)
