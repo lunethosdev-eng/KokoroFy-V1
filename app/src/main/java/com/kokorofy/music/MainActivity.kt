@@ -81,24 +81,44 @@ fun LiquidGlass(
     corner: RoundedCornerShape = RoundedCornerShape(22.dp),
     content: @Composable BoxScope.() -> Unit
 ) {
+    val ctx = LocalContext.current
+    val intensity = Prefs.glassIntensity(ctx).coerceIn(0.4f, 1f)
     Box(
         modifier
             .clip(corner)
             .background(
                 Brush.linearGradient(
-                    listOf(Color(0xF2FFFFFF), Color(0xCCFFFFFF), Color(0x99E8E4FF)),
-                    start = Offset.Zero, end = Offset(800f, 1200f)
+                    listOf(
+                        Color.White.copy(alpha = 0.92f * intensity),
+                        Color.White.copy(alpha = 0.72f * intensity),
+                        Color(0xFFE8E4FF).copy(alpha = 0.55f * intensity)
+                    ),
+                    start = Offset.Zero, end = Offset(900f, 1400f)
                 )
             )
             .border(
-                1.dp,
-                Brush.linearGradient(listOf(Color(0xAAFFFFFF), Color(0x33FFFFFF), Color(0x66C4B5FD))),
-                corner
+                width = 1.1.dp,
+                brush = Brush.linearGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.85f),
+                        Color.White.copy(alpha = 0.15f),
+                        Color(0xFFC4B5FD).copy(alpha = 0.45f)
+                    )
+                ),
+                shape = corner
             )
     ) {
+        // Specular highlight (Apple-style)
         Box(
-            Modifier.fillMaxWidth().height(36.dp).align(Alignment.TopCenter)
-                .background(Brush.verticalGradient(listOf(Color(0x55FFFFFF), Color.Transparent)))
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.45f)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.White.copy(alpha = 0.35f), Color.Transparent)
+                    )
+                )
         )
         content()
     }
@@ -177,6 +197,20 @@ fun KokoroFyRoot() {
 
         UpdateChecker.check(BuildConfigVersion.NAME)?.let { updateInfo = it }
     }
+
+    // Widget sync
+    LaunchedEffect(current?.id, isPlaying) {
+        current?.let {
+            PlayerWidget.sync(context, it.title, it.artist, isPlaying)
+        }
+    }
+
+    // Changelog una sola vez por versión
+    var showChangelog by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (Changelog.shouldShow(context)) showChangelog = true
+    }
+
 
     // Cuando cambia la canción actual → recargar lyrics de esa canción
     LaunchedEffect(current?.id) {
@@ -557,6 +591,30 @@ fun KokoroFyRoot() {
         }
 
         // Update popup
+        
+        if (showChangelog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showChangelog = false
+                    Changelog.markShown(context)
+                },
+                title = { Text("Novedades ${Changelog.CURRENT}") },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        Changelog.entries.forEach { line ->
+                            Text("• $line", fontSize = 13.sp, modifier = Modifier.padding(vertical = 3.dp))
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showChangelog = false
+                        Changelog.markShown(context)
+                    }) { Text("Genial") }
+                }
+            )
+        }
+
         updateInfo?.let { u ->
             AlertDialog(
                 onDismissRequest = { updateInfo = null },
@@ -593,24 +651,64 @@ fun KokoroFyRoot() {
 
 @Composable
 fun HomeScreen(songs: List<Song>, accent: Color, onPlay: (Song) -> Unit, onDownload: (Song) -> Unit) {
+    val ctx = LocalContext.current
+    val page = Prefs.pageSize(ctx).coerceIn(10, 50)
+    var visible by remember { mutableIntStateOf(page) }
+    LaunchedEffect(songs.size) {
+        visible = page
+        while (visible < songs.size) {
+            kotlinx.coroutines.delay(80)
+            visible = (visible + page).coerceAtMost(songs.size)
+        }
+    }
+    val shown = remember(songs, visible) { songs.take(visible) }
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = R.drawable.kokorofy_icon, contentDescription = null,
-                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp))
             )
             Spacer(Modifier.width(10.dp))
             Text("KokoroFy", fontWeight = FontWeight.Bold, fontSize = 22.sp)
         }
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(18.dp))
         Text("PARA TI", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-        Text("Escucha lo que te gusta.", fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
-        Text("El catálogo se actualiza solo cada 3 min", fontSize = 12.sp, color = Color.Gray)
-        Spacer(Modifier.height(16.dp))
-        if (songs.isEmpty()) Text("Cargando catálogo…", color = Color.Gray)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-            items(songs, key = { it.id }) { TrackRow(it, accent, { onPlay(it) }, { onDownload(it) }) }
+        Text(
+            "Escucha lo que te gusta.",
+            fontSize = if (Prefs.largeTitles(ctx)) 30.sp else 24.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.8).sp
+        )
+        Text("Catálogo en vivo · ${shown.size}/${songs.size}", fontSize = 12.sp, color = Color.Gray)
+        Spacer(Modifier.height(14.dp))
+        if (songs.isEmpty()) {
+            Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = accent)
+            }
+        }
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(if (Prefs.compactLists(ctx)) 4.dp else 8.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
+            items(shown, key = { it.id }) { song ->
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = true,
+                    enter = fadeIn(tween(280)) + slideInVertically(
+                        animationSpec = tween(280),
+                        initialOffsetY = { it / 6 }
+                    )
+                ) {
+                    TrackRow(song, accent, { onPlay(song) }, { onDownload(song) })
+                }
+            }
+            if (visible < songs.size) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = accent)
+                    }
+                }
+            }
         }
     }
 }
@@ -807,9 +905,18 @@ fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         LiquidGlass(corner = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(16.dp)) {
-                Text("PRIVACIDAD", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Text("PRIVACIDAD (10)", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                Text("Borra descargas offline y caché de audio de la app.", fontSize = 13.sp, color = Color.Gray)
+                PrivacyToggle(ctx, "Sin analíticas", Prefs.analyticsOff(ctx)) { Prefs.setAnalyticsOff(ctx, it) }
+                PrivacyToggle(ctx, "Ocultar historial", Prefs.hideHistory(ctx)) { Prefs.setHideHistory(ctx, it) }
+                PrivacyToggle(ctx, "Sesión privada", Prefs.privateSession(ctx)) { Prefs.setPrivateSession(ctx, it) }
+                PrivacyToggle(ctx, "Bloquear capturas", Prefs.blockScreenshots(ctx)) { Prefs.setBlockScreenshots(ctx, it) }
+                PrivacyToggle(ctx, "Limpiar al salir", Prefs.clearOnExit(ctx)) { Prefs.setClearOnExit(ctx, it) }
+                PrivacyToggle(ctx, "Sin backup en la nube", Prefs.noCloudBackup(ctx)) { Prefs.setNoCloudBackup(ctx, it) }
+                PrivacyToggle(ctx, "Ocultar carátula en notificación", Prefs.hideNotificationArt(ctx)) { Prefs.setHideNotificationArt(ctx, it) }
+                PrivacyToggle(ctx, "Pedir biometría (flag)", Prefs.requireBiometric(ctx)) { Prefs.setRequireBiometric(ctx, it) }
+                PrivacyToggle(ctx, "Limitar red medida", Prefs.limitNetworkMetered(ctx)) { Prefs.setLimitNetworkMetered(ctx, it) }
+                PrivacyToggle(ctx, "No guardar búsquedas", Prefs.redactSearch(ctx)) { Prefs.setRedactSearch(ctx, it) }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = {
                     val dir = java.io.File(ctx.filesDir, "offline")
@@ -1175,6 +1282,15 @@ fun LyricsFullscreen(
     }
 }
 
+@Composable
+fun PrivacyToggle(ctx: android.content.Context, label: String, value: Boolean, onChange: (Boolean) -> Unit) {
+    var v by remember { mutableStateOf(value) }
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f), fontSize = 14.sp)
+        Switch(checked = v, onCheckedChange = { v = it; onChange(it) })
+    }
+}
+
 fun formatTime(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
     return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
@@ -1204,5 +1320,5 @@ fun parseLrc(raw: String): List<LyricLine> {
 
 /** Evita depender de BuildConfig generado en todos los entornos. */
 object BuildConfigVersion {
-    const val NAME = "1.2.0"
+    const val NAME = "1.3.0"
 }
