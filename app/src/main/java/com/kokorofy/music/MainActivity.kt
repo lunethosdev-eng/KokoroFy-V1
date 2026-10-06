@@ -67,11 +67,18 @@ fun KokoroFyApp() {
     var showEq by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        // Cargar catálogo sin bloquear la UI
         runCatching { repo.refresh() }
+
+        // Conectar MediaController de forma asíncrona (no usa .get())
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
-        MediaController.Builder(context, token).buildAsync().let { future ->
-            runCatching { controller = future.get() }
-        }
+        val future = MediaController.Builder(context, token).buildAsync()
+        future.addListener(
+            {
+                runCatching { controller = future.get() }
+            },
+            context.mainExecutor
+        )
     }
 
     DisposableEffect(Unit) {
