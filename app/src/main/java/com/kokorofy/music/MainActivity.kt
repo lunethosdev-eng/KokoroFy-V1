@@ -405,8 +405,22 @@ fun KokoroFyRoot() {
         // FULL PLAYER — fondo opaco (NO se ve el home)
         AnimatedVisibility(
             visible = showFullPlayer && current != null,
-            enter = if (reduceMotion) fadeIn() else slideInVertically({ it }, tween(380, easing = FastOutSlowInEasing)) + fadeIn(tween(280)),
-            exit = if (reduceMotion) fadeOut() else slideOutVertically({ it }, tween(320)) + fadeOut(tween(220)),
+            enter = if (reduceMotion) {
+                fadeIn(tween(200))
+            } else {
+                slideInVertically(
+                    animationSpec = tween(380, easing = FastOutSlowInEasing),
+                    initialOffsetY = { fullHeight -> fullHeight }
+                ) + fadeIn(tween(280))
+            },
+            exit = if (reduceMotion) {
+                fadeOut(tween(180))
+            } else {
+                slideOutVertically(
+                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                    targetOffsetY = { fullHeight -> fullHeight }
+                ) + fadeOut(tween(220))
+            },
             modifier = Modifier.fillMaxSize().zIndex(10f)
         ) {
             current?.let { song ->
