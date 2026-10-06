@@ -185,7 +185,7 @@ fun KokoroFyRoot() {
                 val c = future.get()
                 controller = c
                 // Velocidad de reproducción real
-                c.setPlaybackSpeed(Prefs.playbackSpeed(context))
+                c.setPlaybackSpeed(Prefs.speed(context))
                 c.currentMediaItem?.mediaId?.let { id ->
                     scope.launch { current = db.songDao().get(id) ?: current }
                 }
@@ -883,7 +883,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(12.dp))
         val ctx = LocalContext.current
-        var speed by remember { mutableFloatStateOf(Prefs.playbackSpeed(ctx)) }
+       var speed by remember { mutableFloatStateOf(Prefs.speed(ctx)) }
         LiquidGlass(corner = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(16.dp)) {
                 Text("AUDIO", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
@@ -893,7 +893,7 @@ fun SettingsScreen(
                     value = speed,
                     onValueChange = {
                         speed = it
-                        Prefs.setPlaybackSpeed(ctx, it)
+                        Prefs.setSpeed(ctx, it)
                     },
                     valueRange = 0.5f..2f,
                     steps = 5
