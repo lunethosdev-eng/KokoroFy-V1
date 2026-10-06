@@ -1,15 +1,20 @@
 package com.kokorofy.music
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -40,32 +45,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil.compose.AsyncImage
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            KokoroFyTheme {
-                KokoroFyRoot()
-            }
-        }
+        setContent { KokoroFyTheme { KokoroFyRoot() } }
     }
 }
 
-/* ───────────────── Theme + Liquid Glass ───────────────── */
-
-private val GlassWhite = Color(0xE6FFFFFF)
-private val GlassPurple = Color(0x33A78BFA)
 private val Bg = Color(0xFFF4F2FA)
 private val Purple = Color(0xFF746BE8)
 private val TextDark = Color(0xFF18181C)
@@ -74,16 +69,12 @@ private val TextDark = Color(0xFF18181C)
 fun KokoroFyTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
-            background = Bg,
-            surface = Color.White,
-            primary = Purple,
-            onSurface = TextDark
+            background = Bg, surface = Color.White, primary = Purple, onSurface = TextDark
         ),
         content = content
     )
 }
 
-/** Superficie Liquid Glass: blur + tinte + highlight specular. */
 @Composable
 fun LiquidGlass(
     modifier: Modifier = Modifier,
@@ -95,44 +86,23 @@ fun LiquidGlass(
             .clip(corner)
             .background(
                 Brush.linearGradient(
-                    listOf(
-                        Color(0xF2FFFFFF),
-                        Color(0xCCFFFFFF),
-                        Color(0x99E8E4FF)
-                    ),
-                    start = Offset(0f, 0f),
-                    end = Offset(800f, 1200f)
+                    listOf(Color(0xF2FFFFFF), Color(0xCCFFFFFF), Color(0x99E8E4FF)),
+                    start = Offset.Zero, end = Offset(800f, 1200f)
                 )
             )
             .border(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    listOf(
-                        Color(0xAAFFFFFF),
-                        Color(0x33FFFFFF),
-                        Color(0x66C4B5FD)
-                    )
-                ),
-                shape = corner
+                1.dp,
+                Brush.linearGradient(listOf(Color(0xAAFFFFFF), Color(0x33FFFFFF), Color(0x66C4B5FD))),
+                corner
             )
     ) {
-        // Highlight specular arriba
         Box(
-            Modifier
-                .fillMaxWidth()
-                .height(40.dp)
-                .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0x55FFFFFF), Color.Transparent)
-                    )
-                )
+            Modifier.fillMaxWidth().height(36.dp).align(Alignment.TopCenter)
+                .background(Brush.verticalGradient(listOf(Color(0x55FFFFFF), Color.Transparent)))
         )
         content()
     }
 }
-
-/* ───────────────── Root ───────────────── */
 
 @Composable
 fun KokoroFyRoot() {
@@ -159,8 +129,12 @@ fun KokoroFyRoot() {
     var tiltX by remember { mutableFloatStateOf(0f) }
     var tiltY by remember { mutableFloatStateOf(0f) }
     var selectedPlaylist by remember { mutableStateOf<Playlist?>(null) }
+    var showAddToPlaylist by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<AppUpdate?>(null) }
+    var accentColor by remember { mutableStateOf(Purple) }
+    var reduceMotion by remember { mutableStateOf(false) }
 
-    // Conectar MediaController SIN bloquear UI
+    // MediaController async
     LaunchedEffect(Unit) {
         runCatching { repo.refresh() }
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
@@ -169,31 +143,26 @@ fun KokoroFyRoot() {
             runCatching {
                 val c = future.get()
                 controller = c
-                // Restaurar canción actual si el servicio ya tenía algo
                 c.currentMediaItem?.mediaId?.let { id ->
-                    scope.launch {
-                        current = db.songDao().get(id) ?: current
-                    }
+                    scope.launch { current = db.songDao().get(id) ?: current }
                 }
                 isPlaying = c.isPlaying
                 position = c.currentPosition.coerceAtLeast(0L)
                 duration = c.duration.takeIf { it > 0 } ?: 0L
             }
         }, context.mainExecutor)
+
+        // Check updates
+        UpdateChecker.check(BuildConfigVersion.NAME)?.let { updateInfo = it }
     }
 
-    // Listener del player → mini player no se reinicia
     DisposableEffect(controller) {
         val c = controller ?: return@DisposableEffect onDispose {}
         val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying = playing
-            }
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                 item?.mediaId?.let { id ->
-                    scope.launch {
-                        current = db.songDao().get(id) ?: current
-                    }
+                    scope.launch { current = db.songDao().get(id) ?: current }
                 }
             }
             override fun onPlaybackStateChanged(state: Int) {
@@ -201,12 +170,9 @@ fun KokoroFyRoot() {
             }
         }
         c.addListener(listener)
-        onDispose {
-            c.removeListener(listener)
-        }
+        onDispose { c.removeListener(listener) }
     }
 
-    // Poll posición suave
     LaunchedEffect(controller) {
         while (true) {
             controller?.let {
@@ -215,32 +181,40 @@ fun KokoroFyRoot() {
                 if (d > 0) duration = d
                 isPlaying = it.isPlaying
             }
-            delay(250)
+            kotlinx.coroutines.delay(250)
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { /* no release — el servicio vive */ }
-    }
-
-    // Giroscopio experimental
+    // Gyro smoothed
     DisposableEffect(gyroEnabled) {
         if (!gyroEnabled) {
             tiltX = 0f; tiltY = 0f
             return@DisposableEffect onDispose {}
         }
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        val sensor = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-            ?: sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+            ?: sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            ?: sm.getDefaultSensor(Sensor.TYPE_GRAVITY)
         val listener = object : SensorEventListener {
+            private var sx = 0f
+            private var sy = 0f
             override fun onSensorChanged(e: SensorEvent) {
-                if (e.sensor.type == Sensor.TYPE_ROTATION_VECTOR && e.values.size >= 3) {
-                    tiltX = (e.values[1] * 18f).coerceIn(-18f, 18f)
-                    tiltY = (e.values[0] * 18f).coerceIn(-18f, 18f)
-                } else if (e.values.size >= 2) {
-                    tiltX = (e.values[0] * 2f).coerceIn(-18f, 18f)
-                    tiltY = (e.values[1] * 2f).coerceIn(-18f, 18f)
+                val rawX: Float
+                val rawY: Float
+                when (e.sensor.type) {
+                    Sensor.TYPE_GRAVITY -> {
+                        rawX = e.values[0] * 3f
+                        rawY = e.values[1] * 3f
+                    }
+                    else -> {
+                        rawX = (e.values.getOrNull(1) ?: 0f) * 25f
+                        rawY = (e.values.getOrNull(0) ?: 0f) * 25f
+                    }
                 }
+                sx = sx * 0.85f + rawX * 0.15f
+                sy = sy * 0.85f + rawY * 0.15f
+                tiltX = sx.coerceIn(-22f, 22f)
+                tiltY = sy.coerceIn(-22f, 22f)
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
@@ -250,7 +224,6 @@ fun KokoroFyRoot() {
 
     fun playSong(song: Song, queue: List<Song> = listOf(song)) {
         val c = controller ?: return
-        // Si ya es la misma canción, solo resume (NO reinicia)
         if (c.currentMediaItem?.mediaId == song.id) {
             if (!c.isPlaying) c.play()
             current = song
@@ -258,9 +231,10 @@ fun KokoroFyRoot() {
             return
         }
         val items = queue.map { s ->
+            val uri = OfflineManager.playUri(context, s)
             MediaItem.Builder()
                 .setMediaId(s.id)
-                .setUri(s.audioUrl)
+                .setUri(uri)
                 .setMediaMetadata(
                     androidx.media3.common.MediaMetadata.Builder()
                         .setTitle(s.title)
@@ -268,8 +242,7 @@ fun KokoroFyRoot() {
                         .setAlbumTitle(s.album)
                         .setArtworkUri(s.coverUrl?.let(android.net.Uri::parse))
                         .build()
-                )
-                .build()
+                ).build()
         }
         val start = queue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
         c.setMediaItems(items, start, 0L)
@@ -280,41 +253,56 @@ fun KokoroFyRoot() {
         lyricsText = null
     }
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xFFF8F6FF), Color(0xFFEDE9FE), Bg)
-                )
-            )
-    ) {
-        // Fondo difuminado del cover (Liquid Glass reflection base)
-        current?.coverUrl?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(48.dp)
-                    .graphicsLayer {
-                        alpha = 0.22f
-                        translationX = tiltX * 1.2f
-                        translationY = tiltY * 1.2f
-                        scaleX = 1.08f
-                        scaleY = 1.08f
-                    }
-            )
+    // Permission for local music
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            scope.launch {
+                val local = LocalMusicScanner.scanDevice(context)
+                if (local.isNotEmpty()) {
+                    db.songDao().upsertAll(local)
+                    Toast.makeText(context, "${local.size} canciones locales", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "No se encontró música", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            Toast.makeText(context, "Permiso denegado", Toast.LENGTH_SHORT).show()
         }
+    }
 
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val json = BackupManager.exportAll(context, songs, playlists)
+                BackupManager.writeToUri(context, uri, json)
+                Toast.makeText(context, "Exportado ✓", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val json = BackupManager.readFromUri(context, uri)
+                val n = BackupManager.importJson(context, json)
+                Toast.makeText(context, "Importadas $n canciones", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFFF8F6FF), Bg)))) {
         Scaffold(
             containerColor = Color.Transparent,
             bottomBar = {
                 Column {
-                    // Mini player
                     AnimatedVisibility(
-                        visible = current != null && !showFullPlayer,
+                        visible = current != null && !showFullPlayer && !showLyricsFull,
                         enter = slideInVertically { it } + fadeIn(),
                         exit = slideOutVertically { it } + fadeOut()
                     ) {
@@ -324,45 +312,32 @@ fun KokoroFyRoot() {
                                 isPlaying = isPlaying,
                                 position = position,
                                 duration = duration,
+                                accent = accentColor,
                                 onOpen = { showFullPlayer = true },
                                 onPlayPause = {
-                                    controller?.let {
-                                        if (it.isPlaying) it.pause() else it.play()
-                                    }
+                                    controller?.let { if (it.isPlaying) it.pause() else it.play() }
                                 },
                                 onNext = { controller?.seekToNextMediaItem() }
                             )
                         }
                     }
-                    // Nav
                     LiquidGlass(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                         corner = RoundedCornerShape(28.dp)
                     ) {
-                        NavigationBar(
-                            containerColor = Color.Transparent,
-                            tonalElevation = 0.dp
-                        ) {
-                            val items = listOf(
+                        NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp) {
+                            listOf(
                                 Triple(0, "Inicio", Icons.Filled.Home),
                                 Triple(1, "Buscar", Icons.Filled.Search),
                                 Triple(2, "Biblioteca", Icons.Filled.LibraryMusic),
                                 Triple(3, "Ajustes", Icons.Filled.Settings)
-                            )
-                            items.forEach { (i, name, icon) ->
+                            ).forEach { (i, name, icon) ->
                                 NavigationBarItem(
                                     selected = tab == i,
-                                    onClick = {
-                                        tab = i
-                                        selectedPlaylist = null
-                                    },
+                                    onClick = { tab = i; selectedPlaylist = null },
                                     icon = { Icon(icon, name) },
                                     label = { Text(name, fontSize = 11.sp) },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        indicatorColor = Color(0x33746BE8)
-                                    )
+                                    colors = NavigationBarItemDefaults.colors(indicatorColor = accentColor.copy(alpha = 0.2f))
                                 )
                             }
                         }
@@ -372,64 +347,67 @@ fun KokoroFyRoot() {
         ) { pad ->
             Box(Modifier.padding(pad)) {
                 when (tab) {
-                    0 -> HomeScreen(
-                        songs = songs,
-                        onPlay = { playSong(it, songs) },
-                        onDownload = { OfflineManager.download(context, it) }
-                    )
-                    1 -> SearchScreen(
-                        songs = songs,
-                        query = query,
-                        onQuery = { query = it },
-                        onPlay = { playSong(it, songs) },
-                        onDownload = { OfflineManager.download(context, it) }
-                    )
+                    0 -> HomeScreen(songs, accentColor, { playSong(it, songs) }) {
+                        OfflineManager.download(context, it)
+                    }
+                    1 -> SearchScreen(songs, query, { query = it }, { playSong(it, songs) }) {
+                        OfflineManager.download(context, it)
+                    }
                     2 -> LibraryScreen(
-                        songs = songs,
-                        playlists = playlists,
-                        selected = selectedPlaylist,
+                        songs, playlists, selectedPlaylist,
                         onSelectPlaylist = { selectedPlaylist = it },
                         onCreatePlaylist = { name ->
                             scope.launch {
-                                db.playlistDao().upsert(
-                                    Playlist(UUID.randomUUID().toString(), name)
-                                )
+                                db.playlistDao().upsert(Playlist(UUID.randomUUID().toString(), name))
                             }
                         },
                         onPlay = { playSong(it, songs) },
-                        onAddToPlaylist = { pl, song ->
-                            scope.launch {
-                                db.playlistDao().addSong(
-                                    PlaylistSong(pl.id, song.id)
-                                )
-                            }
-                        },
                         onDownload = { OfflineManager.download(context, it) },
                         db = db
                     )
                     3 -> SettingsScreen(
                         gyroEnabled = gyroEnabled,
                         onGyro = { gyroEnabled = it },
-                        songCount = songs.size
+                        songCount = songs.size,
+                        offlineCount = OfflineManager.offlineCount(context),
+                        accentColor = accentColor,
+                        onAccent = { accentColor = it },
+                        reduceMotion = reduceMotion,
+                        onReduceMotion = { reduceMotion = it },
+                        onScanLocal = {
+                            val perm = if (Build.VERSION.SDK_INT >= 33)
+                                Manifest.permission.READ_MEDIA_AUDIO
+                            else Manifest.permission.READ_EXTERNAL_STORAGE
+                            if (ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED) {
+                                scope.launch {
+                                    val local = LocalMusicScanner.scanDevice(context)
+                                    db.songDao().upsertAll(local)
+                                    Toast.makeText(context, "${local.size} canciones locales", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                permissionLauncher.launch(perm)
+                            }
+                        },
+                        onExport = { exportLauncher.launch("kokorofy-backup.json") },
+                        onImport = { importLauncher.launch(arrayOf("application/json", "*/*")) },
+                        onCheckUpdate = {
+                            scope.launch {
+                                val u = UpdateChecker.check(BuildConfigVersion.NAME)
+                                if (u != null) updateInfo = u
+                                else Toast.makeText(context, "Ya tienes la última versión", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     )
                 }
             }
         }
 
-        // Full Player con slide-down
+        // FULL PLAYER — fondo opaco (NO se ve el home)
         AnimatedVisibility(
             visible = showFullPlayer && current != null,
-            enter = slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = tween(380, easing = FastOutSlowInEasing)
-            ) + fadeIn(tween(280)),
-            exit = slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = tween(320, easing = FastOutSlowInEasing)
-            ) + fadeOut(tween(220)),
-            modifier = Modifier
-                .fillMaxSize()
-                .zIndex(10f)
+            enter = if (reduceMotion) fadeIn() else slideInVertically({ it }, tween(380, easing = FastOutSlowInEasing)) + fadeIn(tween(280)),
+            exit = if (reduceMotion) fadeOut() else slideOutVertically({ it }, tween(320)) + fadeOut(tween(220)),
+            modifier = Modifier.fillMaxSize().zIndex(10f)
         ) {
             current?.let { song ->
                 FullPlayer(
@@ -442,6 +420,7 @@ fun KokoroFyRoot() {
                     tiltX = tiltX,
                     tiltY = tiltY,
                     gyroEnabled = gyroEnabled,
+                    accent = accentColor,
                     onClose = { showFullPlayer = false },
                     onLoadLyrics = {
                         scope.launch {
@@ -449,14 +428,22 @@ fun KokoroFyRoot() {
                             lyricsText = r?.synced ?: r?.plain
                         }
                     },
-                    onLyricsFull = { showLyricsFull = true },
+                    onLyricsFull = {
+                        if (lyricsText == null) {
+                            scope.launch {
+                                val r = LyricsRepository().fetch(song)
+                                lyricsText = r?.synced ?: r?.plain
+                            }
+                        }
+                        showLyricsFull = true
+                    },
                     onDownload = { OfflineManager.download(context, song) },
+                    onMore = { showAddToPlaylist = true },
                     onSeek = { controller?.seekTo(it) },
                     onPrev = { controller?.seekToPreviousMediaItem() },
                     onNext = { controller?.seekToNextMediaItem() },
                     onShuffle = {
-                        controller?.shuffleModeEnabled =
-                            !(controller?.shuffleModeEnabled ?: false)
+                        controller?.shuffleModeEnabled = !(controller?.shuffleModeEnabled ?: false)
                     },
                     onRepeat = {
                         val mode = controller?.repeatMode ?: Player.REPEAT_MODE_OFF
@@ -467,112 +454,135 @@ fun KokoroFyRoot() {
                         }
                     },
                     onPlayPause = {
-                        controller?.let {
-                            if (it.isPlaying) it.pause() else it.play()
-                        }
+                        controller?.let { if (it.isPlaying) it.pause() else it.play() }
                     }
                 )
             }
         }
 
-        // Lyrics fullscreen karaoke
+        // Lyrics fullscreen — opaco, sin UI del player
         AnimatedVisibility(
             visible = showLyricsFull && current != null,
-            enter = fadeIn() + scaleIn(initialScale = 0.96f),
-            exit = fadeOut() + scaleOut(targetScale = 0.96f),
-            modifier = Modifier
-                .fillMaxSize()
-                .zIndex(20f)
+            enter = fadeIn() + scaleIn(initialScale = 0.97f),
+            exit = fadeOut() + scaleOut(targetScale = 0.97f),
+            modifier = Modifier.fillMaxSize().zIndex(20f)
         ) {
             current?.let { song ->
                 LyricsFullscreen(
                     song = song,
                     lyricsText = lyricsText,
                     position = position,
+                    accent = accentColor,
                     onClose = { showLyricsFull = false }
                 )
             }
         }
+
+        // Add to playlist sheet
+        if (showAddToPlaylist && current != null) {
+            AlertDialog(
+                onDismissRequest = { showAddToPlaylist = false },
+                title = { Text("Agregar a playlist") },
+                text = {
+                    if (playlists.isEmpty()) {
+                        Text("Crea una playlist en Biblioteca primero.")
+                    } else {
+                        Column {
+                            playlists.forEach { pl ->
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        db.playlistDao().addSong(
+                                            PlaylistSong(pl.id, current!!.id)
+                                        )
+                                        Toast.makeText(context, "Añadida a «${pl.name}»", Toast.LENGTH_SHORT).show()
+                                        showAddToPlaylist = false
+                                    }
+                                }) { Text(pl.name) }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showAddToPlaylist = false }) { Text("Cerrar") }
+                }
+            )
+        }
+
+        // Update popup
+        updateInfo?.let { u ->
+            AlertDialog(
+                onDismissRequest = { updateInfo = null },
+                title = { Text("Actualización disponible") },
+                text = {
+                    Column {
+                        Text("Versión ${u.tag}", fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(u.body.take(400).ifBlank { u.name }, fontSize = 14.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Instala el APK nuevo sin desinstalar: tus datos y descargas se conservan.",
+                            fontSize = 13.sp,
+                            color = Color.Gray
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val url = u.apkUrl ?: u.htmlUrl
+                        UpdateChecker.openUrl(context, url)
+                        updateInfo = null
+                    }) { Text("Actualizar") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { updateInfo = null }) { Text("Después") }
+                }
+            )
+        }
     }
 }
 
-/* ───────────────── Screens ───────────────── */
+/* ── Screens ── */
 
 @Composable
-fun HomeScreen(
-    songs: List<Song>,
-    onPlay: (Song) -> Unit,
-    onDownload: (Song) -> Unit
-) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 18.dp)
-    ) {
+fun HomeScreen(songs: List<Song>, accent: Color, onPlay: (Song) -> Unit, onDownload: (Song) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
-                model = R.drawable.kokorofy_icon,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                model = R.drawable.kokorofy_icon, contentDescription = null,
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
             )
             Spacer(Modifier.width(10.dp))
             Text("KokoroFy", fontWeight = FontWeight.Bold, fontSize = 22.sp)
         }
         Spacer(Modifier.height(22.dp))
         Text("PARA TI", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-        Text(
-            "Escucha lo que te gusta.",
-            fontSize = 30.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.8).sp
-        )
+        Text("Escucha lo que te gusta.", fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
         Spacer(Modifier.height(16.dp))
-        if (songs.isEmpty()) {
-            Text("Cargando catálogo…", color = Color.Gray)
-        }
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 24.dp)
-        ) {
-            items(songs, key = { it.id }) { song ->
-                TrackRow(song, onPlay = { onPlay(song) }, onDownload = { onDownload(song) })
-            }
+        if (songs.isEmpty()) Text("Cargando catálogo…", color = Color.Gray)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+            items(songs, key = { it.id }) { TrackRow(it, accent, { onPlay(it) }, { onDownload(it) }) }
         }
     }
 }
 
 @Composable
 fun SearchScreen(
-    songs: List<Song>,
-    query: String,
-    onQuery: (String) -> Unit,
-    onPlay: (Song) -> Unit,
-    onDownload: (Song) -> Unit
+    songs: List<Song>, query: String, onQuery: (String) -> Unit,
+    onPlay: (Song) -> Unit, onDownload: (Song) -> Unit
 ) {
     val filtered = remember(songs, query) {
         if (query.isBlank()) emptyList()
-        else songs.filter {
-            "${it.title} ${it.artist} ${it.album}".contains(query, ignoreCase = true)
-        }
+        else songs.filter { "${it.title} ${it.artist} ${it.album}".contains(query, true) }
     }
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 18.dp)
-    ) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
         Spacer(Modifier.height(16.dp))
         Text("Buscar", fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         LiquidGlass(corner = RoundedCornerShape(18.dp)) {
             OutlinedTextField(
-                value = query,
-                onValueChange = onQuery,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(4.dp),
+                value = query, onValueChange = onQuery,
+                modifier = Modifier.fillMaxWidth().padding(4.dp),
                 singleLine = true,
                 placeholder = { Text("Artistas, canciones, álbumes") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
@@ -585,19 +595,11 @@ fun SearchScreen(
             )
         }
         Spacer(Modifier.height(16.dp))
-        if (query.isBlank()) {
-            Text(
-                "Escribe para buscar en tu catálogo",
-                color = Color.Gray,
-                modifier = Modifier.padding(top = 40.dp)
-            )
-        } else if (filtered.isEmpty()) {
-            Text("Sin resultados", color = Color.Gray)
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(filtered, key = { it.id }) { song ->
-                    TrackRow(song, onPlay = { onPlay(song) }, onDownload = { onDownload(song) })
-                }
+        when {
+            query.isBlank() -> Text("Escribe para buscar", color = Color.Gray, modifier = Modifier.padding(top = 40.dp))
+            filtered.isEmpty() -> Text("Sin resultados", color = Color.Gray)
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(filtered, key = { it.id }) { TrackRow(it, Purple, { onPlay(it) }, { onDownload(it) }) }
             }
         }
     }
@@ -605,64 +607,37 @@ fun SearchScreen(
 
 @Composable
 fun LibraryScreen(
-    songs: List<Song>,
-    playlists: List<Playlist>,
-    selected: Playlist?,
-    onSelectPlaylist: (Playlist?) -> Unit,
-    onCreatePlaylist: (String) -> Unit,
-    onPlay: (Song) -> Unit,
-    onAddToPlaylist: (Playlist, Song) -> Unit,
-    onDownload: (Song) -> Unit,
-    db: AppDatabase
+    songs: List<Song>, playlists: List<Playlist>, selected: Playlist?,
+    onSelectPlaylist: (Playlist?) -> Unit, onCreatePlaylist: (String) -> Unit,
+    onPlay: (Song) -> Unit, onDownload: (Song) -> Unit, db: AppDatabase
 ) {
     var showCreate by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
-    val playlistSongs by if (selected != null) {
+    val playlistSongs by if (selected != null)
         db.playlistDao().observePlaylistSongs(selected.id).collectAsState(emptyList())
-    } else {
-        remember { mutableStateOf(emptyList()) }
-    }
+    else remember { mutableStateOf(emptyList()) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 18.dp)
-    ) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (selected != null) {
-                IconButton(onClick = { onSelectPlaylist(null) }) {
-                    Icon(Icons.Default.ArrowBack, "Volver")
-                }
+                IconButton(onClick = { onSelectPlaylist(null) }) { Icon(Icons.Default.ArrowBack, null) }
             }
-            Text(
-                selected?.name ?: "Biblioteca",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text(selected?.name ?: "Biblioteca", fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             if (selected == null) {
-                IconButton(onClick = { showCreate = true }) {
-                    Icon(Icons.Default.PlaylistAdd, "Nueva playlist")
-                }
+                IconButton(onClick = { showCreate = true }) { Icon(Icons.Default.PlaylistAdd, null) }
             }
         }
         Spacer(Modifier.height(12.dp))
-
         if (selected == null) {
             Text("PLAYLISTS", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            if (playlists.isEmpty()) {
-                Text("Crea tu primera playlist", color = Color.Gray, fontSize = 14.sp)
-            }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(playlists, key = { it.id }) { pl ->
                     LiquidGlass(corner = RoundedCornerShape(16.dp)) {
                         Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelectPlaylist(pl) }
-                                .padding(14.dp),
+                            Modifier.fillMaxWidth().clickable { onSelectPlaylist(pl) }.padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(Icons.Default.QueueMusic, null, tint = Purple)
@@ -673,147 +648,176 @@ fun LibraryScreen(
                 }
                 item {
                     Spacer(Modifier.height(16.dp))
-                    Text("TODAS LAS CANCIONES", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                    Text("TODAS", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                 }
-                items(songs, key = { "all-${it.id}" }) { song ->
-                    TrackRow(song, onPlay = { onPlay(song) }, onDownload = { onDownload(song) })
-                }
+                items(songs, key = { "a-${it.id}" }) { TrackRow(it, Purple, { onPlay(it) }, { onDownload(it) }) }
             }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (playlistSongs.isEmpty()) {
-                    item {
-                        Text(
-                            "Playlist vacía. Agrega canciones desde Inicio (mantén el icono de descarga / menú).",
-                            color = Color.Gray
-                        )
-                    }
-                }
-                items(playlistSongs, key = { it.id }) { song ->
-                    TrackRow(song, onPlay = { onPlay(song) }, onDownload = { onDownload(song) })
-                }
+                if (playlistSongs.isEmpty()) item { Text("Playlist vacía", color = Color.Gray) }
+                items(playlistSongs, key = { it.id }) { TrackRow(it, Purple, { onPlay(it) }, { onDownload(it) }) }
             }
         }
     }
-
     if (showCreate) {
         AlertDialog(
             onDismissRequest = { showCreate = false },
             title = { Text("Nueva playlist") },
-            text = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    singleLine = true,
-                    label = { Text("Nombre") }
-                )
-            },
+            text = { OutlinedTextField(newName, { newName = it }, singleLine = true, label = { Text("Nombre") }) },
             confirmButton = {
                 TextButton(onClick = {
                     if (newName.isNotBlank()) {
-                        onCreatePlaylist(newName.trim())
-                        newName = ""
-                        showCreate = false
+                        onCreatePlaylist(newName.trim()); newName = ""; showCreate = false
                     }
                 }) { Text("Crear") }
             },
-            dismissButton = {
-                TextButton(onClick = { showCreate = false }) { Text("Cancelar") }
-            }
+            dismissButton = { TextButton(onClick = { showCreate = false }) { Text("Cancelar") } }
         )
     }
 }
 
 @Composable
 fun SettingsScreen(
-    gyroEnabled: Boolean,
-    onGyro: (Boolean) -> Unit,
-    songCount: Int
+    gyroEnabled: Boolean, onGyro: (Boolean) -> Unit,
+    songCount: Int, offlineCount: Int,
+    accentColor: Color, onAccent: (Color) -> Unit,
+    reduceMotion: Boolean, onReduceMotion: (Boolean) -> Unit,
+    onScanLocal: () -> Unit, onExport: () -> Unit, onImport: () -> Unit, onCheckUpdate: () -> Unit
 ) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(18.dp)
-    ) {
+    val accents = listOf(
+        Color(0xFF746BE8), Color(0xFFEC4899), Color(0xFF06B6D4),
+        Color(0xFF10B981), Color(0xFFF59E0B), Color(0xFFEF4444)
+    )
+    Column(Modifier.fillMaxSize().padding(18.dp).verticalScroll(rememberScrollState())) {
         Text("Ajustes", fontSize = 30.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(18.dp))
+
         LiquidGlass(corner = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(16.dp)) {
                 Text("EXPERIMENTAL", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Efecto 3D cinemático", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Usa el giroscopio: al inclinar el teléfono el fondo se difumina con parallax suave.",
-                            fontSize = 13.sp,
-                            color = Color.Gray
-                        )
+                        Text("Parallax suave con giroscopio / gravedad", fontSize = 13.sp, color = Color.Gray)
                     }
                     Switch(checked = gyroEnabled, onCheckedChange = onGyro)
                 }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Reducir animaciones", fontWeight = FontWeight.SemiBold)
+                        Text("Menos motion si prefieres", fontSize = 13.sp, color = Color.Gray)
+                    }
+                    Switch(checked = reduceMotion, onCheckedChange = onReduceMotion)
+                }
             }
         }
-        Spacer(Modifier.height(14.dp))
+
+        Spacer(Modifier.height(12.dp))
+        LiquidGlass(corner = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("PERSONALIZACIÓN", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(10.dp))
+                Text("Color de acento", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    accents.forEach { c ->
+                        Box(
+                            Modifier.size(36.dp).clip(CircleShape).background(c)
+                                .border(if (c == accentColor) 3.dp else 0.dp, Color.Black.copy(alpha = 0.3f), CircleShape)
+                                .clickable { onAccent(c) }
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        LiquidGlass(corner = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("MÚSICA LOCAL", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Escanea Music / Audio del teléfono vía MediaStore", fontSize = 13.sp, color = Color.Gray)
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onScanLocal) {
+                    Icon(Icons.Default.FolderOpen, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Escanear dispositivo")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        LiquidGlass(corner = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("RESPALDO", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Exporta / importa playlists y catálogo (JSON)", fontSize = 13.sp, color = Color.Gray)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = onExport) { Text("Exportar") }
+                    OutlinedButton(onClick = onImport) { Text("Importar") }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        LiquidGlass(corner = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("ACTUALIZACIONES", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Versión actual: ${BuildConfigVersion.NAME}", fontSize = 14.sp)
+                Text("Instala el APK nuevo sin desinstalar para conservar datos.", fontSize = 13.sp, color = Color.Gray)
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onCheckUpdate) {
+                    Icon(Icons.Default.SystemUpdate, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Buscar actualización")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
         LiquidGlass(corner = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(16.dp)) {
                 Text("CATÁLOGO", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                Text("$songCount canciones en caché local", fontSize = 14.sp)
-                Text(
-                    "Las descargas offline se guardan en la caché interna de la app (Media3), no en la galería.",
-                    fontSize = 13.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
+                Spacer(Modifier.height(6.dp))
+                Text("$songCount canciones · $offlineCount offline", fontSize = 14.sp)
             }
         }
-        Spacer(Modifier.height(14.dp))
-        LiquidGlass(corner = RoundedCornerShape(20.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("KokoroFy", fontWeight = FontWeight.Bold)
-                Text("v1.1 · Liquid Glass · Native Player", fontSize = 13.sp, color = Color.Gray)
-            }
-        }
+        Spacer(Modifier.height(40.dp))
     }
 }
 
-/* ───────────────── Rows / Mini / Full ───────────────── */
+/* ── Components ── */
 
 @Composable
-fun TrackRow(song: Song, onPlay: () -> Unit, onDownload: () -> Unit) {
+fun TrackRow(song: Song, accent: Color, onPlay: () -> Unit, onDownload: () -> Unit) {
+    val ctx = LocalContext.current
+    val offline = OfflineManager.isDownloaded(ctx, song.id)
     LiquidGlass(corner = RoundedCornerShape(16.dp)) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onPlay)
-                .padding(10.dp),
+            Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
-                model = song.coverUrl ?: R.drawable.kokorofy_icon,
-                contentDescription = null,
+                model = song.coverUrl ?: R.drawable.kokorofy_icon, contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    song.title,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(song.artist, color = Color.Gray, fontSize = 13.sp, maxLines = 1)
             }
             IconButton(onClick = onDownload) {
-                Icon(Icons.Outlined.DownloadForOffline, "Descargar offline")
+                Icon(
+                    if (offline) Icons.Filled.DownloadDone else Icons.Outlined.DownloadForOffline,
+                    "Descargar",
+                    tint = if (offline) accent else TextDark
+                )
             }
         }
     }
@@ -821,62 +825,35 @@ fun TrackRow(song: Song, onPlay: () -> Unit, onDownload: () -> Unit) {
 
 @Composable
 fun MiniPlayer(
-    song: Song,
-    isPlaying: Boolean,
-    position: Long,
-    duration: Long,
-    onOpen: () -> Unit,
-    onPlayPause: () -> Unit,
-    onNext: () -> Unit
+    song: Song, isPlaying: Boolean, position: Long, duration: Long, accent: Color,
+    onOpen: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit
 ) {
     val progress = if (duration > 0) position.toFloat() / duration else 0f
     LiquidGlass(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-            .clickable(onClick = onOpen),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clickable(onClick = onOpen),
         corner = RoundedCornerShape(18.dp)
     ) {
         Column {
             LinearProgressIndicator(
                 progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp),
-                color = Purple,
-                trackColor = Color(0x22000000)
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+                color = accent, trackColor = Color(0x22000000)
             )
-            Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 AsyncImage(
-                    model = song.coverUrl ?: R.drawable.kokorofy_icon,
-                    contentDescription = null,
+                    model = song.coverUrl ?: R.drawable.kokorofy_icon, contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                    modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp))
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        song.title,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(song.artist, fontSize = 12.sp, color = Color.Gray, maxLines = 1)
                 }
                 IconButton(onClick = onPlayPause) {
-                    Icon(
-                        if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        "Play/Pause"
-                    )
+                    Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, null)
                 }
-                IconButton(onClick = onNext) {
-                    Icon(Icons.Filled.SkipNext, "Siguiente")
-                }
+                IconButton(onClick = onNext) { Icon(Icons.Filled.SkipNext, null) }
             }
         }
     }
@@ -884,103 +861,69 @@ fun MiniPlayer(
 
 @Composable
 fun FullPlayer(
-    song: Song,
-    controller: MediaController?,
-    isPlaying: Boolean,
-    position: Long,
-    duration: Long,
-    lyricsText: String?,
-    tiltX: Float,
-    tiltY: Float,
-    gyroEnabled: Boolean,
-    onClose: () -> Unit,
-    onLoadLyrics: () -> Unit,
-    onLyricsFull: () -> Unit,
-    onDownload: () -> Unit,
-    onSeek: (Long) -> Unit,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
-    onShuffle: () -> Unit,
-    onRepeat: () -> Unit,
-    onPlayPause: () -> Unit
+    song: Song, controller: MediaController?, isPlaying: Boolean,
+    position: Long, duration: Long, lyricsText: String?,
+    tiltX: Float, tiltY: Float, gyroEnabled: Boolean, accent: Color,
+    onClose: () -> Unit, onLoadLyrics: () -> Unit, onLyricsFull: () -> Unit,
+    onDownload: () -> Unit, onMore: () -> Unit,
+    onSeek: (Long) -> Unit, onPrev: () -> Unit, onNext: () -> Unit,
+    onShuffle: () -> Unit, onRepeat: () -> Unit, onPlayPause: () -> Unit
 ) {
-    Box(Modifier.fillMaxSize()) {
-        // Fondo cover blur
+    // Capa OPACA completa — no se ve el home debajo
+    Box(Modifier.fillMaxSize().background(Color(0xFF0C0C10))) {
         AsyncImage(
-            model = song.coverUrl ?: R.drawable.kokorofy_icon,
-            contentDescription = null,
+            model = song.coverUrl ?: R.drawable.kokorofy_icon, contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxSize()
-                .blur(40.dp)
-                .graphicsLayer {
-                    alpha = 0.55f
-                    if (gyroEnabled) {
-                        translationX = tiltX * 2f
-                        translationY = tiltY * 2f
-                        scaleX = 1.12f
-                        scaleY = 1.12f
-                    }
+            modifier = Modifier.fillMaxSize().blur(48.dp).graphicsLayer {
+                alpha = 0.5f
+                if (gyroEnabled) {
+                    translationX = tiltX * 2.5f
+                    translationY = tiltY * 2.5f
+                    scaleX = 1.15f; scaleY = 1.15f
                 }
+            }
         )
-        // Overlay oscuro suave
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color(0x99000000))
-        )
+        Box(Modifier.fillMaxSize().background(Color(0xAA000000)))
 
         Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = 22.dp, vertical = 12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) {
-                    Icon(Icons.Default.KeyboardArrowDown, "Cerrar", tint = Color.White)
+                    Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White)
                 }
                 Spacer(Modifier.weight(1f))
-                Text(
-                    "REPRODUCIENDO",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xCCFFFFFF)
-                )
+                Text("REPRODUCIENDO", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xCCFFFFFF))
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = onDownload) {
-                    Icon(Icons.Outlined.DownloadForOffline, "Offline", tint = Color.White)
+                IconButton(onClick = onMore) {
+                    Icon(Icons.Default.MoreVert, "Más", tint = Color.White)
                 }
             }
 
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
             AsyncImage(
-                model = song.coverUrl ?: R.drawable.kokorofy_icon,
-                contentDescription = null,
+                model = song.coverUrl ?: R.drawable.kokorofy_icon, contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(28.dp))
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(28.dp))
                     .graphicsLayer {
                         if (gyroEnabled) {
-                            rotationX = tiltY * 0.35f
-                            rotationY = -tiltX * 0.35f
-                            cameraDistance = 12f * density
+                            rotationX = tiltY * 0.4f
+                            rotationY = -tiltX * 0.4f
+                            cameraDistance = 14f * density
                         }
                     }
             )
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(20.dp))
             Text(song.title, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Text(song.artist, fontSize = 16.sp, color = Color(0xCCFFFFFF))
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
             Slider(
                 value = if (duration > 0) position.toFloat() / duration else 0f,
-                onValueChange = { v -> onSeek((v * duration).toLong()) },
+                onValueChange = { onSeek((it * duration).toLong()) },
                 colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White,
+                    thumbColor = Color.White, activeTrackColor = Color.White,
                     inactiveTrackColor = Color(0x44FFFFFF)
                 )
             )
@@ -989,52 +932,54 @@ fun FullPlayer(
                 Text(formatTime(duration), fontSize = 12.sp, color = Color(0xAAFFFFFF))
             }
 
-            Spacer(Modifier.height(8.dp))
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onShuffle) {
-                    Icon(
-                        Icons.Default.Shuffle, "Shuffle",
-                        tint = if (controller?.shuffleModeEnabled == true) Purple else Color.White
-                    )
+                    Icon(Icons.Default.Shuffle, null,
+                        tint = if (controller?.shuffleModeEnabled == true) accent else Color.White)
                 }
                 IconButton(onClick = onPrev) {
-                    Icon(Icons.Default.SkipPrevious, "Prev", tint = Color.White, modifier = Modifier.size(36.dp))
+                    Icon(Icons.Default.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(36.dp))
                 }
                 FilledIconButton(
-                    onClick = onPlayPause,
-                    modifier = Modifier.size(68.dp),
-                    shape = CircleShape,
+                    onClick = onPlayPause, modifier = Modifier.size(68.dp), shape = CircleShape,
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White)
                 ) {
                     Icon(
                         if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        "Play",
-                        tint = TextDark,
-                        modifier = Modifier.size(34.dp)
+                        null, tint = TextDark, modifier = Modifier.size(34.dp)
                     )
                 }
                 IconButton(onClick = onNext) {
-                    Icon(Icons.Default.SkipNext, "Next", tint = Color.White, modifier = Modifier.size(36.dp))
+                    Icon(Icons.Default.SkipNext, null, tint = Color.White, modifier = Modifier.size(36.dp))
                 }
                 IconButton(onClick = onRepeat) {
                     val mode = controller?.repeatMode ?: Player.REPEAT_MODE_OFF
                     Icon(
-                        when (mode) {
-                            Player.REPEAT_MODE_ONE -> Icons.Default.RepeatOne
-                            Player.REPEAT_MODE_ALL -> Icons.Default.Repeat
-                            else -> Icons.Default.Repeat
-                        },
-                        "Repeat",
-                        tint = if (mode != Player.REPEAT_MODE_OFF) Purple else Color.White
+                        if (mode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
+                        null, tint = if (mode != Player.REPEAT_MODE_OFF) accent else Color.White
                     )
                 }
             }
 
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                TextButton(onClick = onDownload) {
+                    Icon(Icons.Outlined.DownloadForOffline, null, tint = Color.White)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Offline", color = Color.White)
+                }
+                TextButton(onClick = onLyricsFull) {
+                    Icon(Icons.Default.Lyrics, null, tint = Color.White)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Letras", color = Color.White)
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
             LiquidGlass(corner = RoundedCornerShape(20.dp)) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1043,17 +988,12 @@ fun FullPlayer(
                         TextButton(onClick = {
                             if (lyricsText == null) onLoadLyrics()
                             onLyricsFull()
-                        }) {
-                            Text("Fullscreen")
-                        }
+                        }) { Text("Fullscreen") }
                     }
-                    Spacer(Modifier.height(8.dp))
                     if (lyricsText == null) {
-                        TextButton(onClick = onLoadLyrics) {
-                            Text("Cargar letras")
-                        }
+                        TextButton(onClick = onLoadLyrics) { Text("Cargar letras") }
                     } else {
-                        KaraokePreview(lyricsText!!, position)
+                        KaraokePreview(lyricsText!!, position, accent)
                     }
                 }
             }
@@ -1063,22 +1003,23 @@ fun FullPlayer(
 }
 
 @Composable
-fun KaraokePreview(lyrics: String, position: Long) {
+fun KaraokePreview(lyrics: String, position: Long, accent: Color) {
     val lines = remember(lyrics) { parseLrc(lyrics) }
     if (lines.isEmpty()) {
-        Text(lyrics, fontSize = 16.sp, lineHeight = 26.sp, maxLines = 8, overflow = TextOverflow.Ellipsis)
+        Text(lyrics, fontSize = 16.sp, lineHeight = 26.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
         return
     }
     val active = lines.indexOfLast { it.timeMs <= position }.coerceAtLeast(0)
     Column {
-        lines.drop(maxOf(0, active - 1)).take(5).forEachIndexed { i, line ->
+        lines.drop(maxOf(0, active - 1)).take(5).forEach { line ->
             val isActive = lines.indexOf(line) == active
+            val scale by animateFloatAsState(if (isActive) 1.05f else 1f, label = "ks")
             Text(
                 line.text,
                 fontSize = if (isActive) 18.sp else 15.sp,
                 fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                color = if (isActive) Purple else Color.Gray,
-                modifier = Modifier.padding(vertical = 3.dp)
+                color = if (isActive) accent else Color.Gray,
+                modifier = Modifier.padding(vertical = 3.dp).graphicsLayer { scaleX = scale; scaleY = scale }
             )
         }
     }
@@ -1086,83 +1027,60 @@ fun KaraokePreview(lyrics: String, position: Long) {
 
 @Composable
 fun LyricsFullscreen(
-    song: Song,
-    lyricsText: String?,
-    position: Long,
-    onClose: () -> Unit
+    song: Song, lyricsText: String?, position: Long, accent: Color, onClose: () -> Unit
 ) {
     val lines = remember(lyricsText) { parseLrc(lyricsText ?: "") }
     val listState = rememberLazyListState()
     val active = if (lines.isEmpty()) -1 else lines.indexOfLast { it.timeMs <= position }.coerceAtLeast(0)
 
     LaunchedEffect(active) {
-        if (active >= 0) {
-            runCatching { listState.animateScrollToItem(maxOf(0, active - 2)) }
-        }
+        if (active >= 0) runCatching { listState.animateScrollToItem(maxOf(0, active - 2)) }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    // OPACO — no se ve el player debajo
+    Box(Modifier.fillMaxSize().background(Color(0xFF0A0A0E))) {
         AsyncImage(
-            model = song.coverUrl ?: R.drawable.kokorofy_icon,
-            contentDescription = null,
+            model = song.coverUrl ?: R.drawable.kokorofy_icon, contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxSize()
-                .blur(50.dp)
-                .graphicsLayer { alpha = 0.45f }
+            modifier = Modifier.fillMaxSize().blur(56.dp).graphicsLayer { alpha = 0.4f }
         )
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color(0xBB000000))
-        )
+        Box(Modifier.fillMaxSize().background(Color(0xBB000000)))
+
         Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, "Cerrar", tint = Color.White)
-                }
+            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onClose) { Icon(Icons.Default.Close, null, tint = Color.White) }
                 Column(Modifier.weight(1f)) {
                     Text(song.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1)
                     Text(song.artist, color = Color(0xAAFFFFFF), fontSize = 13.sp)
                 }
             }
-            if (lyricsText.isNullOrBlank()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            when {
+                lyricsText.isNullOrBlank() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Sin letras", color = Color.White)
                 }
-            } else if (lines.isEmpty()) {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(24.dp)
+                lines.isEmpty() -> Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
                 ) {
-                    Text(lyricsText, color = Color.White, fontSize = 22.sp, lineHeight = 34.sp, textAlign = TextAlign.Center)
+                    Text(lyricsText!!, color = Color.White, fontSize = 22.sp, lineHeight = 34.sp, textAlign = TextAlign.Center)
                 }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                else -> LazyColumn(
+                    state = listState, modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 28.dp, vertical = 40.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     items(lines.size) { i ->
                         val line = lines[i]
                         val isActive = i == active
+                        val alpha by animateFloatAsState(if (isActive) 1f else 0.35f, label = "la")
+                        val scale by animateFloatAsState(if (isActive) 1.08f else 1f, tween(300), label = "ls")
                         Text(
                             line.text,
                             fontSize = if (isActive) 28.sp else 18.sp,
                             fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isActive) Color.White else Color(0x66FFFFFF),
+                            color = if (isActive) Color.White else Color.White.copy(alpha = alpha),
                             textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 10.dp)
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                                .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
                         )
                     }
                 }
@@ -1170,8 +1088,6 @@ fun LyricsFullscreen(
         }
     }
 }
-
-/* ───────────────── Helpers ───────────────── */
 
 fun formatTime(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
@@ -1183,23 +1099,24 @@ fun parseLrc(raw: String): List<LyricLine> {
     val regex = Regex("""\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?]\s*(.*)""")
     val out = mutableListOf<LyricLine>()
     raw.lineSequence().forEach { line ->
-        val m = regex.find(line.trim())
-        if (m != null) {
-            val min = m.groupValues[1].toLongOrNull() ?: return@forEach
-            val sec = m.groupValues[2].toLongOrNull() ?: return@forEach
-            val frac = m.groupValues[3].let {
-                when {
-                    it.isEmpty() -> 0L
-                    it.length == 1 -> it.toLong() * 100
-                    it.length == 2 -> it.toLong() * 10
-                    else -> it.take(3).toLong()
-                }
-            }
-            val text = m.groupValues[4].trim()
-            if (text.isNotEmpty()) {
-                out += LyricLine(min * 60_000 + sec * 1000 + frac, text)
+        val m = regex.find(line.trim()) ?: return@forEach
+        val min = m.groupValues[1].toLongOrNull() ?: return@forEach
+        val sec = m.groupValues[2].toLongOrNull() ?: return@forEach
+        val frac = m.groupValues[3].let {
+            when {
+                it.isEmpty() -> 0L
+                it.length == 1 -> it.toLong() * 100
+                it.length == 2 -> it.toLong() * 10
+                else -> it.take(3).toLong()
             }
         }
+        val text = m.groupValues[4].trim()
+        if (text.isNotEmpty()) out += LyricLine(min * 60_000 + sec * 1000 + frac, text)
     }
     return out.sortedBy { it.timeMs }
+}
+
+/** Evita depender de BuildConfig generado en todos los entornos. */
+object BuildConfigVersion {
+    const val NAME = "1.1.0"
 }
