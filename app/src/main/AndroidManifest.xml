@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
 
     <application
         android:theme="@style/Theme.KokoroFy"
@@ -35,7 +36,6 @@
             </intent-filter>
         </service>
 
-        <!-- DownloadService ya no es obligatorio; OfflineManager usa archivos internos -->
         <service
             android:name=".KokoroDownloadService"
             android:exported="false"
@@ -46,6 +46,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+                <action android:name="com.kokorofy.music.WIDGET_SYNC"/>
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
