@@ -1,78 +1,101 @@
-# KokoroFy Android Native
+# KokoroFy – Liquid Glass Music App
 
-Esta es la base nativa Android para la siguiente etapa de KokoroFy.
+App de música inspirada en **Apple Music** + **Spotify**, con efecto **Liquid Glass** real, equalizer con Web Audio API, letras sincronizadas, reproducción offline y listo para convertir a APK con Capacitor + GitHub Actions.
 
-## Lo que incluye
+## Características
 
-- UI nativa en Jetpack Compose.
-- Diseño minimalista inspirado en patrones de Apple Music/Spotify, sin copiar código ni assets propietarios.
-- Full Player.
-- Letras desde Supabase y fallback HTTP a LRCLIB.
-- Media3/ExoPlayer.
-- MediaSessionService para reproducción en segundo plano y controles del sistema.
-- Widget de reproducción para pantalla de inicio.
-- Room para catálogo local.
-- Icono proporcionado por el usuario.
-- Base para ecualizador/visualizador animado.
-- Descargas offline mediante Media3 DownloadService/DownloadManager y reproducción cacheada con Media3.
+- **Bootloader** animado (el video pixel moon → KokoroFy)
+- **Liquid Glass** CSS (blur + saturación + specular + filtro SVG de refracción)
+- **Full Player** profesional estilo Apple Music (gestos, sheet, letras, EQ real)
+- **Equalizer real** con `AnalyserNode` de Web Audio API (barras animadas según frecuencias)
+- **Letras sincronizadas** (usa el campo `lyrics` jsonb de Supabase)
+- **Offline**: descarga canciones al Cache API / Service Worker (PWA)
+- **Mini-player** flotante con progress ring
+- **Navegación** inferior glass (Inicio / Buscar / Biblioteca / Radio)
+- **PWA** instalable + Service Worker para cache de audio y covers
+- **Capacitor** listo para APK nativo
+- **GitHub Actions** workflow para generar el APK automáticamente
 
-## Offline real
+## Setup rápido
 
-La versión nativa ya incluye `OfflineManager`, `KokoroDownloadService` y una caché de Media3 compartida con el reproductor. Al pulsar Descargar, el archivo se guarda en el almacenamiento privado de la app y el reproductor usa la caché cuando existe. Para que el modo avión funcione, el usuario debe haber descargado la pista previamente y el servidor debe permitir la descarga. Debes tener los derechos necesarios para ofrecer ese contenido offline.
+```bash
+cd kokorofy-music-app
+cp .env.example .env
+# Edita .env y pon tu VITE_SUPABASE_ANON_KEY (anon key pública de Supabase)
+
+npm install
+npm run dev
+```
+
+Abre http://localhost:5173
 
 ## Supabase
 
-Configura `Config.kt`:
+La app intenta primero la tabla `songs` y si no existe usa `tracks` (schema Kokoro).
 
-SUPABASE_URL
-SUPABASE_PUBLISHABLE_KEY
+Campos esperados:
+- `id`, `title`, `artist`, `audio_url`, `cover_url`, `duration`, `album`
+- `lyrics` → array de `{ text: string, time: number }` (segundos)
 
-La app consulta:
+URL por defecto: `https://esjoifsjljvymttinyhj.supabase.co`  
+(cámbiala en `src/lib/supabase.ts` si usas otro proyecto)
 
-`public.songs`
+## Build producción (web / PWA)
 
-con:
-- id
-- title
-- artist
-- album
-- duration
-- audio_url
-- cover_url
-- lyrics
-- lyrics_url
-- created_at
+```bash
+npm run build
+npm run preview
+```
 
-La clave service/secret nunca debe estar dentro de la APK.
+## Convertir a APK (nativo)
 
-## Letras
+```bash
+# 1. Build web
+npm run build
 
-Orden de resolución:
+# 2. Inicializar Capacitor (solo la primera vez)
+npx cap init KokoroFy com.kokorofy.music --web-dir dist
+npx cap add android
 
-1. `songs.lyrics`
-2. `songs.lyrics_url`
-3. fallback HTTP a LRCLIB
+# 3. Sync y abrir Android Studio
+npx cap sync android
+npx cap open android
+```
 
-Si ya tienes las letras en Supabase, se usan primero.
+O usa el workflow de GitHub Actions (`.github/workflows/build-apk.yml`):
+1. Sube el repo a GitHub
+2. Añade el secret `VITE_SUPABASE_ANON_KEY`
+3. Push a `main` → se genera el APK como artifact
 
-## Reproducción del sistema
+## Widgets nativos
 
-`MusicService` usa Media3 `MediaSessionService`. Esto permite que el audio continúe con la pantalla apagada y que Android exponga controles multimedia del sistema.
+Para widgets de home screen (Android):
+- En el proyecto Android generado por Capacitor añade un `AppWidgetProvider`
+- Usa el MediaSession API (ya soportado por el `<audio>` + Web Audio) para controles de notificación/lockscreen
+- Capacitor Community tiene plugins de Media Session y Background Mode
 
-## GitHub Actions
+## Iconos
 
-Coloca el proyecto en GitHub y usa JDK 17 + Android SDK. El workflow puede ejecutar:
+- Logo: `/public/logo.png` (el pixel moon que enviaste)
+- Bootloader video: `/public/bootloader.mp4`
 
-`./gradlew assembleDebug`
+## Estructura
 
-El APK queda en:
+```
+src/
+  components/   # MiniPlayer, FullPlayer, Equalizer, SongCard, BottomNav
+  hooks/        # usePlayerStore (Zustand), useAudioEngine (Web Audio + offline)
+  lib/          # supabase client
+  styles/       # Liquid Glass CSS
+public/         # logo + bootloader video
+.github/workflows/build-apk.yml
+```
 
-`app/build/outputs/apk/debug/app-debug.apk`
+## Notas
 
-## Ecualizador
+- El equalizer solo funciona cuando el usuario interactúa (autoplay policies)
+- Offline requiere que el usuario pulse “Descargar” en el full player
+- Liquid Glass se ve mejor en Chrome/Edge (filtro SVG + backdrop-filter)
+- En iOS Safari el blur funciona, la refracción SVG es limitada
 
-La interfaz incluye un visualizador animado. El procesamiento DSP de Android requiere `android.media.audiofx.Equalizer` conectado al audio session ID de ExoPlayer. Esta base deja la capa visual preparada, pero no afirma que las barras sean un EQ DSP real.
-
-## Icono
-
-El PNG proporcionado se incluye como `app/src/main/res/drawable/kokorofy_icon.png`.
+Hecho con ❤️ para KokoroFy

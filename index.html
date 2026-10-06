@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#1a0a2e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="KokoroFy – Music player with Liquid Glass UI" />
+    <title>KokoroFy</title>
+    <style>
+      /* Critical CSS for bootloader */
+      body {
+        margin: 0;
+        background: #c4b5fd;
+        overflow: hidden;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      #bootloader {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #c4b5fd;
+        transition: opacity 0.5s ease;
+      }
+      #bootloader.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bootloader">
+      <video
+        id="boot-video"
+        src="/bootloader.mp4"
+        autoplay
+        muted
+        playsinline
+        style="width: 100%; height: 100%; object-fit: cover;"
+      ></video>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
