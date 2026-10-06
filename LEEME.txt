@@ -1,0 +1,53 @@
+========================================
+  FIX KSP - KokoroFy APK Build
+========================================
+
+El error sigue siendo:
+  Plugin [id: 'com.google.devtools.ksp'] was not found
+
+Porque el archivo build.gradle.kts DE LA RAÍZ del repo
+todavía NO tiene la línea de KSP.
+
+----------------------------------------
+OPCIÓN A (recomendada) - Con Room + offline
+----------------------------------------
+1. Abre la carpeta:  con-ksp/
+2. Copia estos 2 archivos a la RAÍZ de tu repo KokoroFy-V1
+   (sobrescribe los que ya existen):
+
+   con-ksp/build.gradle.kts      →  KokoroFy-V1/build.gradle.kts
+   con-ksp/app/build.gradle.kts  →  KokoroFy-V1/app/build.gradle.kts
+
+3. Commit + push:
+
+   git add build.gradle.kts app/build.gradle.kts
+   git commit -m "fix: add KSP plugin version 1.9.24-1.0.20"
+   git push origin main
+
+----------------------------------------
+OPCIÓN B (más segura) - Sin Room/KSP
+----------------------------------------
+Si la opción A falla o quieres algo que compile YA:
+
+1. Abre la carpeta:  sin-ksp/
+2. Copia igual:
+
+   sin-ksp/build.gradle.kts      →  KokoroFy-V1/build.gradle.kts
+   sin-ksp/app/build.gradle.kts  →  KokoroFy-V1/app/build.gradle.kts
+
+3. Si tienes AppDatabase.kt (Room), bórralo o coméntalo temporalmente
+   porque sin KSP no compilará Room.
+
+4. Commit + push igual.
+
+----------------------------------------
+IMPORTANTE
+----------------------------------------
+- Los archivos deben quedar exactamente en:
+    KokoroFy-V1/build.gradle.kts
+    KokoroFy-V1/app/build.gradle.kts
+
+- NO dejes una carpeta "con-ksp" o "kokorofy-fix" dentro del repo.
+  Copia el CONTENIDO a la raíz.
+
+- Después del push ve a Actions y espera el build.
