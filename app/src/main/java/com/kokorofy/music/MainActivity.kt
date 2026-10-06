@@ -135,14 +135,37 @@ fun KokoroFyRoot() {
     var reduceMotion by remember { mutableStateOf(false) }
 
     // MediaController async
+    // Cargar prefs de UI
     LaunchedEffect(Unit) {
-        runCatching { repo.refresh() }
+        gyroEnabled = Prefs.gyro(context)
+        reduceMotion = Prefs.reduceMotion(context)
+        val accents = listOf(
+            Color(0xFF746BE8), Color(0xFFEC4899), Color(0xFF06B6D4),
+            Color(0xFF10B981), Color(0xFFF59E0B), Color(0xFFEF4444)
+        )
+        accentColor = accents.getOrElse(Prefs.accentIndex(context)) { accents[0] }
+    }
+
+    // Catálogo auto-refresh (sin borrar datos) cada 3 min + al abrir
+    LaunchedEffect(Unit) {
+        while (true) {
+            runCatching {
+                val n = repo.refresh()
+                android.util.Log.i("KokoroFy", "Catálogo actualizado: $n")
+            }
+            kotlinx.coroutines.delay(3 * 60 * 1000L)
+        }
+    }
+
+    LaunchedEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
         future.addListener({
             runCatching {
                 val c = future.get()
                 controller = c
+                // Velocidad de reproducción real
+                c.setPlaybackSpeed(Prefs.playbackSpeed(context))
                 c.currentMediaItem?.mediaId?.let { id ->
                     scope.launch { current = db.songDao().get(id) ?: current }
                 }
@@ -152,8 +175,16 @@ fun KokoroFyRoot() {
             }
         }, context.mainExecutor)
 
-        // Check updates
         UpdateChecker.check(BuildConfigVersion.NAME)?.let { updateInfo = it }
+    }
+
+    // Cuando cambia la canción actual → recargar lyrics de esa canción
+    LaunchedEffect(current?.id) {
+        lyricsText = null
+        val song = current ?: return@LaunchedEffect
+        if (!song.lyrics.isNullOrBlank()) {
+            lyricsText = song.lyrics
+        }
     }
 
     DisposableEffect(controller) {
@@ -162,7 +193,10 @@ fun KokoroFyRoot() {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                 item?.mediaId?.let { id ->
-                    scope.launch { current = db.songDao().get(id) ?: current }
+                    scope.launch {
+                        current = db.songDao().get(id) ?: current
+                        lyricsText = null // no quedar atrapado en lyrics anteriores
+                    }
                 }
             }
             override fun onPlaybackStateChanged(state: Int) {
@@ -367,13 +401,13 @@ fun KokoroFyRoot() {
                     )
                     3 -> SettingsScreen(
                         gyroEnabled = gyroEnabled,
-                        onGyro = { gyroEnabled = it },
+                        onGyro = { gyroEnabled = it; Prefs.setGyro(context, it) },
                         songCount = songs.size,
                         offlineCount = OfflineManager.offlineCount(context),
                         accentColor = accentColor,
-                        onAccent = { accentColor = it },
+                        onAccent = { accentColor = it; Prefs.setAccentIndex(context, listOf(Color(0xFF746BE8), Color(0xFFEC4899), Color(0xFF06B6D4), Color(0xFF10B981), Color(0xFFF59E0B), Color(0xFFEF4444)).indexOf(it).coerceAtLeast(0)) },
                         reduceMotion = reduceMotion,
-                        onReduceMotion = { reduceMotion = it },
+                        onReduceMotion = { reduceMotion = it; Prefs.setReduceMotion(context, it) },
                         onScanLocal = {
                             val perm = if (Build.VERSION.SDK_INT >= 33)
                                 Manifest.permission.READ_MEDIA_AUDIO
@@ -572,6 +606,7 @@ fun HomeScreen(songs: List<Song>, accent: Color, onPlay: (Song) -> Unit, onDownl
         Spacer(Modifier.height(22.dp))
         Text("PARA TI", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
         Text("Escucha lo que te gusta.", fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
+        Text("El catálogo se actualiza solo cada 3 min", fontSize = 12.sp, color = Color.Gray)
         Spacer(Modifier.height(16.dp))
         if (songs.isEmpty()) Text("Cargando catálogo…", color = Color.Gray)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -745,6 +780,43 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        val ctx = LocalContext.current
+        var speed by remember { mutableFloatStateOf(Prefs.playbackSpeed(ctx)) }
+        LiquidGlass(corner = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("AUDIO", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Velocidad: ${"%.2f".format(speed)}x", fontWeight = FontWeight.SemiBold)
+                Slider(
+                    value = speed,
+                    onValueChange = {
+                        speed = it
+                        Prefs.setPlaybackSpeed(ctx, it)
+                    },
+                    valueRange = 0.5f..2f,
+                    steps = 5
+                )
+                Text("0.5x — 1x — 1.5x — 2x", fontSize = 12.sp, color = Color.Gray)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        LiquidGlass(corner = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("PRIVACIDAD", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Borra descargas offline y caché de audio de la app.", fontSize = 13.sp, color = Color.Gray)
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = {
+                    val dir = java.io.File(ctx.filesDir, "offline")
+                    dir.listFiles()?.forEach { it.delete() }
+                    java.io.File(ctx.filesDir, "music_cache").deleteRecursively()
+                    android.widget.Toast.makeText(ctx, "Caché y offline borrados", android.widget.Toast.LENGTH_SHORT).show()
+                }) { Text("Borrar datos offline") }
             }
         }
 
@@ -1132,5 +1204,5 @@ fun parseLrc(raw: String): List<LyricLine> {
 
 /** Evita depender de BuildConfig generado en todos los entornos. */
 object BuildConfigVersion {
-    const val NAME = "1.1.0"
+    const val NAME = "1.2.0"
 }
