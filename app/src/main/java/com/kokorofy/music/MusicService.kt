@@ -4,8 +4,6 @@ import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -13,6 +11,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
+/**
+ * Servicio de reproducción nativo.
+ * Mantiene el player vivo aunque se cierre la Activity → la posición no se reinicia.
+ */
 class MusicService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private var session: MediaSession? = null
@@ -35,7 +37,12 @@ class MusicService : MediaSessionService() {
                     .build(),
                 true
             )
+            .setHandleAudioBecomingNoisy(true)
             .build()
+            .apply {
+                // No reiniciar al llegar al final de la cola
+                repeatMode = ExoPlayer.REPEAT_MODE_OFF
+            }
 
         session = MediaSession.Builder(this, player)
             .setSessionActivity(
@@ -50,8 +57,10 @@ class MusicService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Keep playback alive when the UI is dismissed.
-        super.onTaskRemoved(rootIntent)
+        // Mantener reproducción en segundo plano
+        if (!player.playWhenReady || player.mediaItemCount == 0) {
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {
