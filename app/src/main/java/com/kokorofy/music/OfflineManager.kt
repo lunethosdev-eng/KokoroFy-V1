@@ -31,10 +31,19 @@ object OfflineManager {
     fun isDownloaded(context: Context, songId: String): Boolean =
         localFile(context, songId).let { it.exists() && it.length() > 1024 }
 
-    /** URI local si está descargada, si no la URL remota. */
+    /** URI local offline, content:// del dispositivo, o URL remota. */
     fun playUri(context: Context, song: Song): String {
         val f = localFile(context, song.id)
-        return if (f.exists() && f.length() > 1024) f.toURI().toString() else song.audioUrl
+        if (f.exists() && f.length() > 1024) return f.toURI().toString()
+        // content:// o file:// del escáner local → se usan tal cual
+        if (song.audioUrl.startsWith("content://") || song.audioUrl.startsWith("file://")) {
+            return song.audioUrl
+        }
+        // Ruta absoluta legada → file://
+        if (song.audioUrl.startsWith("/")) {
+            return java.io.File(song.audioUrl).toURI().toString()
+        }
+        return song.audioUrl
     }
 
     fun download(context: Context, song: Song) {
