@@ -1027,6 +1027,7 @@ private fun FullPlayer(
                         "ui.cover_parallax",
                         true
                     )
+                    val coverParallaxContext = LocalContext.current
                     AsyncImage(
                         model = song.coverUrl ?: R.drawable.kokorofy_icon,
                         contentDescription = null,
@@ -1035,8 +1036,8 @@ private fun FullPlayer(
                             .fillMaxWidth()
                             .aspectRatio(1f)
                             .graphicsLayer {
-                                rotationY = if (FeaturePrefs.get(LocalContext.current, "ui.cover_parallax", true)) tilt.y * 0.55f else 0f
-                                rotationX = if (FeaturePrefs.get(LocalContext.current, "ui.cover_parallax", true)) -tilt.x * 0.45f else 0f
+                                rotationY = if (FeaturePrefs.get(coverParallaxContext, "ui.cover_parallax", true)) tilt.y * 0.55f else 0f
+                                rotationX = if (FeaturePrefs.get(coverParallaxContext, "ui.cover_parallax", true)) -tilt.x * 0.45f else 0f
                                 cameraDistance = 24f * density
                                 translationX = tilt.y * 0.8f
                                 translationY = tilt.x * 0.45f
