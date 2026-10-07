@@ -141,3 +141,5 @@ object Prefs {
 }
 fun isDark(c: Context) = sp(c).getBoolean("dark_mode", false)
 fun setDark(c: Context, v: Boolean) = sp(c).edit().putBoolean("dark_mode", v).apply()
+fun isDark(c: Context) = sp(c).getBoolean("dark_mode", false)
+fun setDark(c: Context, v: Boolean) = sp(c).edit().putBoolean("dark_mode", v).apply()
