@@ -4,6 +4,9 @@ import android.content.Context
 import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -12,38 +15,37 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * Descargas offline DENTRO de la app (filesDir/offline/).
- * No usa DownloadService de Media3 → no crashea.
- * Al reproducir, si existe archivo local se usa ese URI.
+ * Descarga offline con progreso real (0–100).
+ * UI debe leer [progress] — sin gradientes, solo % y título.
  */
 object OfflineManager {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    private fun dir(context: Context): File =
-        File(context.filesDir, "offline").also { if (!it.exists()) it.mkdirs() }
+    data class Progress(
+        val active: Boolean = false,
+        val title: String = "",
+        val percent: Int = 0,
+        val done: Boolean = false,
+        val error: String? = null
+    )
 
-    fun localFile(context: Context, songId: String): File =
-        File(dir(context), "$songId.mp3")
+    private val _progress = MutableStateFlow(Progress())
+    val progress: StateFlow<Progress> = _progress.asStateFlow()
 
-    fun isDownloaded(context: Context, songId: String): Boolean =
-        localFile(context, songId).let { it.exists() && it.length() > 1024 }
+    fun localFile(context: Context, songId: String): File {
+        val dir = File(context.filesDir, "offline").also { if (!it.exists()) it.mkdirs() }
+        return File(dir, "$songId.mp3")
+    }
 
-    /** URI local offline, content:// del dispositivo, o URL remota. */
+    fun isOffline(context: Context, songId: String): Boolean =
+        localFile(context, songId).exists()
+
     fun playUri(context: Context, song: Song): String {
         val f = localFile(context, song.id)
-        if (f.exists() && f.length() > 1024) return f.toURI().toString()
-        // content:// o file:// del escáner local → se usan tal cual
-        if (song.audioUrl.startsWith("content://") || song.audioUrl.startsWith("file://")) {
-            return song.audioUrl
-        }
-        // Ruta absoluta legada → file://
-        if (song.audioUrl.startsWith("/")) {
-            return java.io.File(song.audioUrl).toURI().toString()
-        }
-        return song.audioUrl
+        return if (f.exists()) f.toURI().toString() else song.audioUrl
     }
 
     fun download(context: Context, song: Song) {
@@ -51,21 +53,34 @@ object OfflineManager {
             Toast.makeText(context, "Sin URL de audio", Toast.LENGTH_SHORT).show()
             return
         }
-        if (isDownloaded(context, song.id)) {
-            Toast.makeText(context, "Ya está descargada", Toast.LENGTH_SHORT).show()
+        if (isOffline(context, song.id)) {
+            Toast.makeText(context, "Ya está offline", Toast.LENGTH_SHORT).show()
             return
         }
-        Toast.makeText(context, "Descargando «${song.title}»…", Toast.LENGTH_SHORT).show()
         CoroutineScope(Dispatchers.IO).launch {
+            _progress.value = Progress(active = true, title = song.title, percent = 0)
             val ok = runCatching {
                 val req = Request.Builder().url(song.audioUrl).build()
                 client.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) error("HTTP ${resp.code}")
-                    val body = resp.body ?: error("empty body")
+                    val body = resp.body ?: error("empty")
+                    val total = body.contentLength()
                     val dest = localFile(context, song.id)
                     val tmp = File(dest.parent, "${dest.name}.part")
                     body.byteStream().use { input ->
-                        tmp.outputStream().use { output -> input.copyTo(output) }
+                        tmp.outputStream().use { output ->
+                            val buf = ByteArray(16 * 1024)
+                            var read = 0L
+                            while (true) {
+                                val n = input.read(buf)
+                                if (n <= 0) break
+                                output.write(buf, 0, n)
+                                read += n
+                                val pct = if (total > 0) ((read * 100) / total).toInt().coerceIn(0, 99)
+                                else ((read / (256 * 1024)).toInt() % 90)
+                                _progress.value = Progress(true, song.title, pct)
+                            }
+                        }
                     }
                     if (!tmp.renameTo(dest)) {
                         tmp.copyTo(dest, overwrite = true)
@@ -75,12 +90,22 @@ object OfflineManager {
                 true
             }.getOrElse {
                 it.printStackTrace()
+                _progress.value = Progress(active = true, title = song.title, percent = 0, error = it.message)
                 false
             }
+            _progress.value = Progress(
+                active = true,
+                title = song.title,
+                percent = if (ok) 100 else _progress.value.percent,
+                done = true,
+                error = if (ok) null else (_progress.value.error ?: "Error")
+            )
+            kotlinx.coroutines.delay(900)
+            _progress.value = Progress()
             withContext(Dispatchers.Main) {
                 Toast.makeText(
                     context,
-                    if (ok) "«${song.title}» lista offline ✓" else "Error al descargar",
+                    if (ok) "«${song.title}» offline" else "Error al descargar",
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -89,9 +114,5 @@ object OfflineManager {
 
     fun remove(context: Context, song: Song) {
         localFile(context, song.id).delete()
-        Toast.makeText(context, "Eliminada de offline", Toast.LENGTH_SHORT).show()
     }
-
-    fun offlineCount(context: Context): Int =
-        dir(context).listFiles()?.count { it.extension == "mp3" && it.length() > 1024 } ?: 0
 }
