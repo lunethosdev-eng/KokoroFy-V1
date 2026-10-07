@@ -3,6 +3,7 @@ package com.kokorofy.music
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -15,6 +16,16 @@ class CatalogRepository(context: Context) {
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    /** Flow reactivo de todas las canciones en Room. */
+    val songs: Flow<List<Song>> = dao.observeSongs()
+
+    /**
+     * Upsert manual (usado por búsqueda Seki on-demand).
+     */
+    suspend fun upsertAll(list: List<Song>) = withContext(Dispatchers.IO) {
+        if (list.isNotEmpty()) dao.upsertAll(list)
+    }
 
     /**
      * Siempre vuelve a pedir el catálogo a Supabase.
