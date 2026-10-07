@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,16 +24,36 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-/** Paleta oscura tipo Apple Music / Spotify */
+/** Paleta Spotify-like — sin púrpura. Liquid Glass realista. */
 object KColors {
-    val Bg = Color(0xFF0B0B0F)
-    val BgElevated = Color(0xFF14141A)
-    val Purple = Color(0xFF8B7CFF)
-    val Text = Color(0xFFF2F2F7)
-    val Muted = Color(0xFF9A9AA8)
-    val GlassTop = Color(0x33FFFFFF)
+    // Accent
+    val Green = Color(0xFF1ED760)
+    val GreenDark = Color(0xFF1DB954)
+
+    // Dark mode (casi negro como iOS 26 concept)
+    val Bg = Color(0xFF000000)
+    val BgElevated = Color(0xFF0A0A0C)
+    val Surface = Color(0xFF121214)
+    val Surface2 = Color(0xFF1A1A1E)
+
+    // Light mode
+    val LightBg = Color(0xFFF5F5F7)
+    val LightSurface = Color(0xFFFFFFFF)
+    val LightElevated = Color(0xFFF0F0F2)
+
+    // Text
+    val Text = Color(0xFFF5F5F7)
+    val TextDark = Color(0xFF0A0A0C)
+    val Muted = Color(0xFF8E8E93)
+    val MutedLight = Color(0xFF6B6B70)
+
+    // Glass (translucent white layers — no tint)
+    val GlassTop = Color(0x40FFFFFF)
     val GlassBody = Color(0x22FFFFFF)
-    val GlassBorder = Color(0x44FFFFFF)
+    val GlassBodyLight = Color(0x99FFFFFF)
+    val GlassBorder = Color(0x55FFFFFF)
+    val GlassBorderLight = Color(0xBBFFFFFF)
+    val GlassHighlight = Color(0x66FFFFFF)
 }
 
 @Composable
@@ -40,57 +61,106 @@ fun KokoroDarkTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             background = KColors.Bg,
-            surface = KColors.BgElevated,
-            primary = KColors.Purple,
+            surface = KColors.Surface,
+            primary = KColors.Green,
             onBackground = KColors.Text,
             onSurface = KColors.Text,
-            onPrimary = Color.White
+            onPrimary = Color.Black,
+            secondary = KColors.GreenDark,
+            tertiary = KColors.Muted
         ),
         content = content
     )
 }
 
-/** Liquid Glass oscuro (botones, mini player, cards — no el texto suelto) */
 @Composable
-fun DarkGlass(
+fun KokoroLightTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = lightColorScheme(
+            background = KColors.LightBg,
+            surface = KColors.LightSurface,
+            primary = KColors.Green,
+            onBackground = KColors.TextDark,
+            onSurface = KColors.TextDark,
+            onPrimary = Color.Black,
+            secondary = KColors.GreenDark,
+            tertiary = KColors.MutedLight
+        ),
+        content = content
+    )
+}
+
+/**
+ * Liquid Glass realista — estilo iOS 26 / Spotify concept.
+ * Capas: highlight superior + cuerpo translúcido + borde luminoso + sin tintes de color.
+ * Funciona en dark y light.
+ */
+@Composable
+fun LiquidGlass(
     modifier: Modifier = Modifier,
-    corner: RoundedCornerShape = RoundedCornerShape(20.dp),
+    dark: Boolean = true,
+    corner: RoundedCornerShape = RoundedCornerShape(22.dp),
     content: @Composable BoxScope.() -> Unit
 ) {
+    val bodyColors = if (dark) {
+        listOf(
+            Color(0x38FFFFFF),
+            Color(0x1AFFFFFF),
+            Color(0x12FFFFFF)
+        )
+    } else {
+        listOf(
+            Color(0xCCFFFFFF),
+            Color(0xAAFFFFFF),
+            Color(0x88FFFFFF)
+        )
+    }
+    val borderBrush = if (dark) {
+        Brush.linearGradient(
+            listOf(
+                Color(0x77FFFFFF),
+                Color(0x33FFFFFF),
+                Color(0x22FFFFFF)
+            ),
+            start = Offset.Zero,
+            end = Offset(400f, 600f)
+        )
+    } else {
+        Brush.linearGradient(
+            listOf(
+                Color(0xEEFFFFFF),
+                Color(0xAAFFFFFF),
+                Color(0x66FFFFFF)
+            ),
+            start = Offset.Zero,
+            end = Offset(400f, 600f)
+        )
+    }
+
     Box(
         modifier
             .clip(corner)
             .background(
                 Brush.linearGradient(
-                    listOf(
-                        Color(0x44FFFFFF),
-                        Color(0x22FFFFFF),
-                        Color(0x14A78BFA)
-                    ),
+                    colors = bodyColors,
                     start = Offset.Zero,
-                    end = Offset(600f, 900f)
+                    end = Offset(500f, 800f)
                 )
             )
-            .border(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    listOf(
-                        Color(0x66FFFFFF),
-                        Color(0x22FFFFFF),
-                        Color(0x448B7CFF)
-                    )
-                ),
-                shape = corner
-            )
+            .border(width = 1.dp, brush = borderBrush, shape = corner)
     ) {
+        // Highlight superior (reflejo de vidrio)
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(28.dp)
+                .height(32.dp)
                 .align(Alignment.TopCenter)
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color(0x33FFFFFF), Color.Transparent)
+                        listOf(
+                            if (dark) Color(0x40FFFFFF) else Color(0x66FFFFFF),
+                            Color.Transparent
+                        )
                     )
                 )
         )
@@ -98,14 +168,26 @@ fun DarkGlass(
     }
 }
 
+/** Alias por compatibilidad */
+@Composable
+fun DarkGlass(
+    modifier: Modifier = Modifier,
+    corner: RoundedCornerShape = RoundedCornerShape(20.dp),
+    content: @Composable BoxScope.() -> Unit
+) {
+    LiquidGlass(modifier = modifier, dark = true, corner = corner, content = content)
+}
+
 @Composable
 fun GlassButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    dark: Boolean = true,
     content: @Composable RowScope.() -> Unit
 ) {
-    DarkGlass(
+    LiquidGlass(
         modifier = modifier.clickable(onClick = onClick),
+        dark = dark,
         corner = RoundedCornerShape(16.dp)
     ) {
         Row(
