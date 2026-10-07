@@ -1,8 +1,12 @@
 package com.kokorofy.music
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -10,50 +14,42 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
-/** Paleta Spotify-like — sin púrpura. Liquid Glass realista. */
+/** Paleta Spotify — sin púrpura, sin blancos agresivos. */
 object KColors {
-    // Accent
     val Green = Color(0xFF1ED760)
     val GreenDark = Color(0xFF1DB954)
 
-    // Dark mode (casi negro como iOS 26 concept)
     val Bg = Color(0xFF000000)
     val BgElevated = Color(0xFF0A0A0C)
     val Surface = Color(0xFF121214)
     val Surface2 = Color(0xFF1A1A1E)
 
-    // Light mode
     val LightBg = Color(0xFFF5F5F7)
     val LightSurface = Color(0xFFFFFFFF)
-    val LightElevated = Color(0xFFF0F0F2)
 
-    // Text
     val Text = Color(0xFFF5F5F7)
     val TextDark = Color(0xFF0A0A0C)
     val Muted = Color(0xFF8E8E93)
-    val MutedLight = Color(0xFF6B6B70)
-
-    // Glass (translucent white layers — no tint)
-    val GlassTop = Color(0x40FFFFFF)
-    val GlassBody = Color(0x22FFFFFF)
-    val GlassBodyLight = Color(0x99FFFFFF)
-    val GlassBorder = Color(0x55FFFFFF)
-    val GlassBorderLight = Color(0xBBFFFFFF)
-    val GlassHighlight = Color(0x66FFFFFF)
 }
 
 @Composable
@@ -84,91 +80,86 @@ fun KokoroLightTheme(content: @Composable () -> Unit) {
             onSurface = KColors.TextDark,
             onPrimary = Color.Black,
             secondary = KColors.GreenDark,
-            tertiary = KColors.MutedLight
+            tertiary = KColors.Muted
         ),
         content = content
     )
 }
 
 /**
- * Liquid Glass realista — estilo iOS 26 / Spotify concept.
- * Capas: highlight superior + cuerpo translúcido + borde luminoso + sin tintes de color.
- * Funciona en dark y light.
+ * Liquid Glass sutil — dark mode real.
+ * Sin gradientes blancos pesados. Solo un velo oscuro + borde fino.
+ * Animación: al arrastrar se deforma (offset + scale) y al soltar vuelve con spring bouncy.
  */
 @Composable
 fun LiquidGlass(
     modifier: Modifier = Modifier,
     dark: Boolean = true,
     corner: RoundedCornerShape = RoundedCornerShape(22.dp),
+    interactive: Boolean = true,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val bodyColors = if (dark) {
-        listOf(
-            Color(0x38FFFFFF),
-            Color(0x1AFFFFFF),
-            Color(0x12FFFFFF)
-        )
-    } else {
-        listOf(
-            Color(0xCCFFFFFF),
-            Color(0xAAFFFFFF),
-            Color(0x88FFFFFF)
-        )
-    }
-    val borderBrush = if (dark) {
-        Brush.linearGradient(
-            listOf(
-                Color(0x77FFFFFF),
-                Color(0x33FFFFFF),
-                Color(0x22FFFFFF)
-            ),
-            start = Offset.Zero,
-            end = Offset(400f, 600f)
-        )
-    } else {
-        Brush.linearGradient(
-            listOf(
-                Color(0xEEFFFFFF),
-                Color(0xAAFFFFFF),
-                Color(0x66FFFFFF)
-            ),
-            start = Offset.Zero,
-            end = Offset(400f, 600f)
-        )
-    }
+    val scope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    val offsetY = remember { Animatable(0f) }
+    val scale = remember { Animatable(1f) }
+
+    val body = if (dark) Color(0xFF1C1C1E).copy(alpha = 0.72f) else Color.White.copy(alpha = 0.78f)
+    val borderColor = if (dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
+
+    val springSpec = spring<Float>(
+        dampingRatio = Spring.DampingRatioMediumBouncy,
+        stiffness = Spring.StiffnessLow
+    )
 
     Box(
         modifier
-            .clip(corner)
-            .background(
-                Brush.linearGradient(
-                    colors = bodyColors,
-                    start = Offset.Zero,
-                    end = Offset(500f, 800f)
-                )
-            )
-            .border(width = 1.dp, brush = borderBrush, shape = corner)
-    ) {
-        // Highlight superior (reflejo de vidrio)
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(32.dp)
-                .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            if (dark) Color(0x40FFFFFF) else Color(0x66FFFFFF),
-                            Color.Transparent
-                        )
+            .graphicsLayer {
+                translationX = offsetX.value
+                translationY = offsetY.value
+                scaleX = scale.value
+                scaleY = scale.value
+            }
+            .then(
+                if (interactive) Modifier.pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = {
+                            scope.launch { scale.animateTo(1.04f, springSpec) }
+                        },
+                        onDragEnd = {
+                            scope.launch {
+                                launch { offsetX.animateTo(0f, springSpec) }
+                                launch { offsetY.animateTo(0f, springSpec) }
+                                launch { scale.animateTo(1f, springSpec) }
+                            }
+                        },
+                        onDragCancel = {
+                            scope.launch {
+                                launch { offsetX.animateTo(0f, springSpec) }
+                                launch { offsetY.animateTo(0f, springSpec) }
+                                launch { scale.animateTo(1f, springSpec) }
+                            }
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            // efecto "gota": el desplazamiento se amortigua (líquido)
+                            scope.launch {
+                                offsetX.snapTo((offsetX.value + dragAmount.x * 0.35f).coerceIn(-28f, 28f))
+                                offsetY.snapTo((offsetY.value + dragAmount.y * 0.35f).coerceIn(-28f, 28f))
+                            }
+                        }
                     )
-                )
-        )
+                } else Modifier
+            )
+            .clip(corner)
+            .background(body)
+            .border(width = 0.8.dp, color = borderColor, shape = corner)
+    ) {
         content()
     }
 }
 
-/** Alias por compatibilidad */
+/** Alias */
 @Composable
 fun DarkGlass(
     modifier: Modifier = Modifier,
@@ -188,7 +179,8 @@ fun GlassButton(
     LiquidGlass(
         modifier = modifier.clickable(onClick = onClick),
         dark = dark,
-        corner = RoundedCornerShape(16.dp)
+        corner = RoundedCornerShape(16.dp),
+        interactive = false
     ) {
         Row(
             Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
