@@ -281,7 +281,13 @@ fun KokoroFyApp(
             return@LaunchedEffect
         }
         searchingRemote = true
-        val results = runCatching { SekiClient.search(query) }.getOrDefault(emptyList())
+        // Seki funciona mejor con queries cortas; si pegan un link, pásalo tal cual
+        val q = when {
+            query.startsWith("http") -> query.trim()
+            query.length > 48 -> query.take(48).trim()
+            else -> query.trim()
+        }
+        val results = runCatching { SekiClient.search(q) }.getOrDefault(emptyList())
         remoteSongs = results
         searchingRemote = false
         // Auto-upsert a Room y auto-descarga del primero si hay resultados
@@ -330,6 +336,21 @@ fun KokoroFyApp(
         }
     }
 
+
+    fun shareSong(song: Song) {
+        val text = buildString {
+            append("Escucha \"${song.title}\" de ${song.artist}")
+            if (song.audioUrl.isNotBlank()) append("\n${song.audioUrl}")
+            append("\n\n— vía KokoroFy")
+        }
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, text)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "${song.title} — ${song.artist}")
+        }
+        context.startActivity(android.content.Intent.createChooser(intent, "Compartir canción"))
+    }
+
     fun loadLyrics() {
         val song = current ?: return
         scope.launch {
@@ -375,6 +396,7 @@ fun KokoroFyApp(
             },
             onLyrics = { if (lyrics == null) loadLyrics() else showLyrics = !showLyrics },
             onDownload = { OfflineManager.download(context, current!!) },
+            onShare = { shareSong(current!!) },
             onSeek = { controller?.seekTo(it) }
         )
         return
@@ -649,10 +671,10 @@ private fun SearchScreen(
         ) {
             items(songs, key = { it.id }) { TrackRow(it, dark, onPlay, onDownload) }
             if (songs.isEmpty() && !searching && query.length >= 2) {
-                item { EmptyState("No encontramos nada. Prueba otra búsqueda.") }
+                item { EmptyState("No encontramos nada. Prueba un nombre más corto o un link.") }
             }
             if (songs.isEmpty() && query.isBlank()) {
-                item { EmptyState("Escribe el nombre de una canción o artista.") }
+                item { EmptyState("Busca una canción, artista o pega un link de YouTube.") }
             }
         }
     }
@@ -742,7 +764,7 @@ private fun MiniPlayer(
             .clickable { onOpen() },
         dark = dark,
         corner = RoundedCornerShape(20.dp),
-        interactive = false
+        interactive = true
     ) {
         Row(
             Modifier
@@ -827,18 +849,26 @@ private fun FullPlayer(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().background(if (dark) Color.Black else Color(0xFFF2F2F7))) {
+        // Portada de fondo (estilo Spotify) — visible y con scrim oscuro/claro
         AsyncImage(
             model = song.coverUrl ?: R.drawable.kokorofy_icon,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize().alpha(if (dark) .22f else .12f)
+            modifier = Modifier.fillMaxSize().alpha(if (dark) 0.45f else 0.28f)
         )
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    if (dark) listOf(Color(0xDD17191B), Color(0xF5090A0B), Color.Black)
-                    else listOf(Color(0xDDF3F3F1), Color(0xF9F7F7F5), Color.White)
+                    if (dark) listOf(
+                        Color.Black.copy(alpha = 0.55f),
+                        Color.Black.copy(alpha = 0.75f),
+                        Color.Black.copy(alpha = 0.92f)
+                    ) else listOf(
+                        Color.White.copy(alpha = 0.70f),
+                        Color.White.copy(alpha = 0.85f),
+                        Color.White.copy(alpha = 0.95f)
+                    )
                 )
             )
         )
@@ -857,6 +887,7 @@ private fun FullPlayer(
                     Text(song.album.ifBlank { "KokoroFy" }, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.weight(1f))
+                IconButton(onClick = onShare) { Icon(Icons.Default.Share, "Compartir") }
                 IconButton(onClick = onDownload) { Icon(Icons.Default.Download, "Descargar") }
             }
 
@@ -877,24 +908,34 @@ private fun FullPlayer(
                     Spacer(Modifier.height(22.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(song.title, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(song.artist, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(song.title, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (dark) Color.White else Color.Black)
+                            Text(song.artist, fontSize = 16.sp, color = if (dark) Color.White.copy(0.65f) else Color.Black.copy(0.55f))
                         }
                         IconButton(onClick = {}) { Icon(Icons.Default.FavoriteBorder, "Me gusta") }
                     }
                     Spacer(Modifier.height(12.dp))
+                    var scrubbing by remember { mutableStateOf(false) }
+                    var scrubPos by remember { mutableFloatStateOf(0f) }
+                    val sliderValue = if (scrubbing) scrubPos else (position.toFloat() / duration.coerceAtLeast(1L)).coerceIn(0f, 1f)
                     Slider(
-                        value = (position.toFloat() / duration.coerceAtLeast(1L)).coerceIn(0f, 1f),
-                        onValueChange = { onSeek((it * duration).toLong()) },
+                        value = sliderValue,
+                        onValueChange = {
+                            scrubbing = true
+                            scrubPos = it
+                        },
+                        onValueChangeFinished = {
+                            onSeek((scrubPos * duration).toLong())
+                            scrubbing = false
+                        },
                         colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.onSurface,
-                            activeTrackColor = MaterialTheme.colorScheme.onSurface,
-                            inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .22f)
+                            thumbColor = SpotifyGreen,
+                            activeTrackColor = SpotifyGreen,
+                            inactiveTrackColor = if (dark) Color.White.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.15f)
                         )
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(formatTime(position), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(formatTime(duration), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatTime(position), fontSize = 11.sp, color = if (dark) Color.White.copy(0.55f) else Color.Black.copy(0.45f))
+                        Text(formatTime(duration), fontSize = 11.sp, color = if (dark) Color.White.copy(0.55f) else Color.Black.copy(0.45f))
                     }
                 }
             }
@@ -927,9 +968,9 @@ private fun FullPlayer(
                                 },
                                 color = when {
                                     isActive -> SpotifyGreen
-                                    dist == 1 -> Color.White.copy(alpha = 0.70f)
-                                    dist == 2 -> Color.White.copy(alpha = 0.40f)
-                                    else -> Color.White.copy(alpha = 0.22f)
+                                    dist == 1 -> if (dark) Color.White.copy(alpha = 0.75f) else Color.Black.copy(alpha = 0.70f)
+                                    dist == 2 -> if (dark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.40f)
+                                    else -> if (dark) Color.White.copy(alpha = 0.25f) else Color.Black.copy(alpha = 0.22f)
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
