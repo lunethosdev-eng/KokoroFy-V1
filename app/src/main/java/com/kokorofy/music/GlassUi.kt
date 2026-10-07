@@ -94,7 +94,7 @@ fun DownloadProgressOverlay(state: OfflineManager.Progress) {
                 if (state.error == null && !state.done) {
                     Spacer(Modifier.height(16.dp))
                     LinearProgressIndicator(
-                        progress = { state.percent / 100f },
+                        progress = state.percent / 100f,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
