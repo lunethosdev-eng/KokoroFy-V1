@@ -246,14 +246,22 @@ fun KokoroFyApp(
     var shuffle by remember { mutableStateOf(false) }
     var repeat by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        runCatching { repo.refresh() }
+    // Conectar MediaController SIN bloquear el hilo principal (evita ANR)
+    DisposableEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
-        runCatching { controller = MediaController.Builder(context, token).buildAsync().get() }
+        val future = MediaController.Builder(context, token).buildAsync()
+        future.addListener({
+            runCatching { controller = future.get() }
+        }, androidx.core.content.ContextCompat.getMainExecutor(context))
+        onDispose {
+            runCatching { future.cancel(true) }
+            controller?.release()
+            controller = null
+        }
     }
 
-    DisposableEffect(controller) {
-        onDispose { controller?.release() }
+    LaunchedEffect(Unit) {
+        runCatching { repo.refresh() }
     }
 
     // Búsqueda remota con Seki: si no hay resultados locales, busca y descarga on-demand
@@ -284,17 +292,18 @@ fun KokoroFyApp(
         }
     }
 
-    LaunchedEffect(controller, current?.id, playing) {
+    // Actualizar posición solo cuando reproduce (sin while agresivo)
+    LaunchedEffect(controller, current?.id) {
+        val c = controller ?: return@LaunchedEffect
         while (true) {
-            controller?.let {
-                val isPlaying = it.isPlaying
-                if (playing != isPlaying) playing = isPlaying
-                if (isPlaying) {
-                    position = it.currentPosition.coerceAtLeast(0L)
-                    duration = it.duration.takeIf { d -> d > 0 } ?: current?.duration?.takeIf { d -> d > 0 } ?: 1L
-                }
+            val isPlaying = runCatching { c.isPlaying }.getOrDefault(false)
+            if (playing != isPlaying) playing = isPlaying
+            if (isPlaying) {
+                position = runCatching { c.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L)
+                val d = runCatching { c.duration }.getOrDefault(0L)
+                if (d > 0) duration = d
             }
-            delay(if (playing) 400 else 1200)
+            delay(if (isPlaying) 500 else 2000)
         }
     }
 
@@ -400,27 +409,56 @@ fun KokoroFyApp(
                         )
                     }
                 }
-                NavigationBar(
-                    containerColor = if (dark) Color(0xFF000000) else Color.White,
-                    tonalElevation = 0.dp,
-                    contentColor = if (dark) Color.White else Color.Black
+                // Nav flotante Liquid Glass, rounded, separado del borde inferior
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
                 ) {
-                    listOf("Inicio", "Buscar", "Biblioteca").forEachIndexed { i, name ->
-                        NavigationBarItem(
-                            selected = tab == i,
-                            onClick = { tab = i },
-                            icon = {
-                                Icon(
-                                    when (i) {
-                                        0 -> Icons.Default.Home
-                                        1 -> Icons.Default.Search
-                                        else -> Icons.Default.LibraryMusic
-                                    },
-                                    null
-                                )
-                            },
-                            label = { Text(name, fontSize = 11.sp) }
-                        )
+                    LiquidGlass(
+                        modifier = Modifier.fillMaxWidth(),
+                        dark = dark,
+                        corner = RoundedCornerShape(28.dp),
+                        interactive = false
+                    ) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(62.dp)
+                                .padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf(
+                                Triple(0, Icons.Default.Home, "Inicio"),
+                                Triple(1, Icons.Default.Search, "Buscar"),
+                                Triple(2, Icons.Default.LibraryMusic, "Biblioteca")
+                            ).forEach { (i, icon, name) ->
+                                val selected = tab == i
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .clickable { tab = i }
+                                        .padding(vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        icon,
+                                        contentDescription = name,
+                                        tint = if (selected) SpotifyGreen else Color.White.copy(alpha = 0.45f),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        name,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (selected) SpotifyGreen else Color.White.copy(alpha = 0.45f)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -704,7 +742,7 @@ private fun MiniPlayer(
             .clickable { onOpen() },
         dark = dark,
         corner = RoundedCornerShape(20.dp),
-        interactive = true
+        interactive = false
     ) {
         Row(
             Modifier
@@ -865,21 +903,37 @@ private fun FullPlayer(
                 if (parsed.isNotEmpty()) {
                     LazyColumn(
                         state = lyricState,
-                        contentPadding = PaddingValues(top = 45.dp, bottom = 35.dp),
+                        contentPadding = PaddingValues(top = 24.dp, bottom = 48.dp, start = 4.dp, end = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         itemsIndexed(parsed) { index, line ->
+                            val isActive = index == activeLine
+                            val dist = kotlin.math.abs(index - activeLine)
                             Text(
                                 line.text,
-                                fontSize = if (index == activeLine) 27.sp else 21.sp,
-                                lineHeight = if (index == activeLine) 33.sp else 28.sp,
-                                fontWeight = if (index == activeLine) FontWeight.ExtraBold else FontWeight.Bold,
-                                color = if (index == activeLine)
-                                    MaterialTheme.colorScheme.onSurface
-                                else
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = .34f),
+                                fontSize = when {
+                                    isActive -> 26.sp
+                                    dist == 1 -> 18.sp
+                                    else -> 16.sp
+                                },
+                                lineHeight = when {
+                                    isActive -> 34.sp
+                                    else -> 24.sp
+                                },
+                                fontWeight = when {
+                                    isActive -> FontWeight.Bold
+                                    dist <= 1 -> FontWeight.SemiBold
+                                    else -> FontWeight.Normal
+                                },
+                                color = when {
+                                    isActive -> SpotifyGreen
+                                    dist == 1 -> Color.White.copy(alpha = 0.70f)
+                                    dist == 2 -> Color.White.copy(alpha = 0.40f)
+                                    else -> Color.White.copy(alpha = 0.22f)
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                                     .clickable { onSeek(line.timeMs) }
                             )
                         }
