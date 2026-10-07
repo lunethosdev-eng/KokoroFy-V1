@@ -55,7 +55,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 object BuildConfigVersion {
-    const val NAME = "1.5.0"
+    const val NAME = "1.5.1"
 }
 
 class MainActivity : ComponentActivity() {
@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
 private val Purple = Color(0xFF8B7CFF)
 private val SpotGreen = Color(0xFF1ED760)
 private val LightBg = Color(0xFFF2F0F8)
-private val DarkBg = Color(0xFF0A0A0C)
+private val DarkBg = Color(0xFF1C1C1E)
 
 @Composable
 fun KokoroTheme(dark: Boolean, content: @Composable () -> Unit) {
@@ -89,10 +89,11 @@ fun KokoroTheme(dark: Boolean, content: @Composable () -> Unit) {
         colorScheme = if (dark) {
             darkColorScheme(
                 background = DarkBg,
-                surface = Color(0xFF16161C),
-                primary = Purple,
-                onBackground = Color(0xFFF2F2F7),
-                onSurface = Color(0xFFF2F2F7)
+                surface = Color(0xFF2C2C2E),
+                primary = SpotGreen,
+                onBackground = Color(0xFFF5F5F7),
+                onSurface = Color(0xFFF5F5F7),
+                secondary = Color(0xFF636366)
             )
         } else {
             lightColorScheme(
@@ -107,7 +108,12 @@ fun KokoroTheme(dark: Boolean, content: @Composable () -> Unit) {
     )
 }
 
-/** Liquid Glass iOS26 / Spotify concept — frosted, borde fino, highlight */
+/**
+ * Liquid Glass realista (estilo Apple):
+ * - capa frosted semitransparente (se ve el fondo)
+ * - borde specular + highlight animado
+ * - sin rellenos opacos “caja negra”
+ */
 @Composable
 fun LiquidGlass(
     modifier: Modifier = Modifier,
@@ -116,26 +122,67 @@ fun LiquidGlass(
     content: @Composable BoxScope.() -> Unit
 ) {
     val dark = MaterialTheme.colorScheme.background == DarkBg
+    val infinite = rememberInfiniteTransition(label = "glass")
+    val shineX by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shineX"
+    )
+
+    // Material glass: más transparente para que se vea el fondo
     val fill = when {
-        dark && intense -> Color(0xCC1A1A20)
-        dark -> Color(0x9916161C)
-        intense -> Color(0xF0FFFFFF)
-        else -> Color(0xCCFFFFFF)
+        dark && intense -> Color(0x55FFFFFF)
+        dark -> Color(0x33FFFFFF)
+        intense -> Color(0xB8FFFFFF)
+        else -> Color(0x99FFFFFF)
     }
-    val edge = if (dark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.55f)
-    val shine = if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.40f)
+    val edgeTop = if (dark) Color.White.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.75f)
+    val edgeBot = if (dark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.06f)
+
     Box(
         modifier
             .clip(corner)
             .background(fill)
-            .border(0.8.dp, edge, corner)
+            .border(
+                width = 1.dp,
+                brush = Brush.verticalGradient(listOf(edgeTop, edgeBot)),
+                shape = corner
+            )
     ) {
+        // Specular highlight superior (cristal)
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(26.dp)
+                .height(if (intense) 28.dp else 20.dp)
                 .align(Alignment.TopCenter)
-                .background(Brush.verticalGradient(listOf(shine, Color.Transparent)))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = if (dark) 0.22f else 0.45f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+        // Reflejo animado diagonal suave
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.White.copy(alpha = if (dark) 0.07f else 0.12f),
+                            Color.Transparent
+                        ),
+                        start = Offset(shineX * 900f - 200f, 0f),
+                        end = Offset(shineX * 900f + 200f, 400f)
+                    )
+                )
         )
         content()
     }
@@ -250,7 +297,18 @@ fun KokoroFyRoot(dark: Boolean, onDarkChange: (Boolean) -> Unit) {
 
     LaunchedEffect(current?.id) {
         lyricsText = null
-        current?.lyrics?.takeIf { it.isNotBlank() }?.let { lyricsText = it }
+        val song = current ?: return@LaunchedEffect
+        song.lyrics?.takeIf { it.isNotBlank() }?.let {
+            lyricsText = it
+            return@LaunchedEffect
+        }
+        // Fallback LRCLIB / repo
+        runCatching {
+            val result = LyricsRepository().fetch(song)
+            val text = result?.synced?.takeIf { it.isNotBlank() }
+                ?: result?.plain?.takeIf { it.isNotBlank() }
+            if (!text.isNullOrBlank()) lyricsText = text
+        }
     }
 
     DisposableEffect(controller) {
@@ -1086,6 +1144,28 @@ fun SettingsScreen(
         }
 
         item {
+            SettingsCard("VERSIONES") {
+                Text(
+                    "Si no te gusta esta UI, puedes instalar una versión anterior desde GitHub Releases sin perder la firma (misma keystore).",
+                    fontSize = 13.sp,
+                    color = cs.onBackground.copy(alpha = 0.7f)
+                )
+                Spacer(Modifier.height(8.dp))
+                GlassAction("Abrir versiones anteriores") {
+                    try {
+                        val i = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://github.com/lunethosdev-eng/KokoroFy-V1/releases")
+                        )
+                        ctx.startActivity(i)
+                    } catch (_: Exception) {
+                        Toast.makeText(ctx, "Abre github.com/lunethosdev-eng/KokoroFy-V1/releases", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+
+        item {
             Spacer(Modifier.height(20.dp))
             Text(
                 "Gracias por tu apoyo a este proyecto pequeño",
@@ -1389,14 +1469,49 @@ fun FullPlayer(
             }
 
             Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                GlassAction("Lyrics", onLyrics)
-                GlassAction("Descargar", onDownload)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                LiquidGlass(
+                    modifier = Modifier.weight(1f).clickable(onClick = onLyrics),
+                    corner = RoundedCornerShape(14.dp),
+                    intense = true
+                ) {
+                    Text(
+                        "Lyrics",
+                        modifier = Modifier.padding(vertical = 12.dp).fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                LiquidGlass(
+                    modifier = Modifier.weight(1f).clickable(onClick = onDownload),
+                    corner = RoundedCornerShape(14.dp),
+                    intense = true
+                ) {
+                    Text(
+                        "Descargar",
+                        modifier = Modifier.padding(vertical = 12.dp).fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
 
+            Spacer(Modifier.height(14.dp))
             if (!lyrics.isNullOrBlank()) {
-                Spacer(Modifier.height(14.dp))
                 KaraokePreview(lyrics = lyrics, position = position, accent = accent)
+            } else {
+                Text(
+                    "Sin letras sincronizadas aún",
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }
