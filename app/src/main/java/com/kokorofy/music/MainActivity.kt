@@ -593,8 +593,8 @@ fun KokoroFyRoot(dark: Boolean, onDarkChange: (Boolean) -> Unit) {
         updateInfo?.let { u ->
             AlertDialog(
                 onDismissRequest = { updateInfo = null },
-                title = { Text("Actualización ${u.version}") },
-                text = { Text(u.notes.ifBlank { "Hay una nueva versión disponible." }) },
+                title = { Text("Actualización ${u.tag}") },
+                text = { Text(u.body.ifBlank { "Hay una nueva versión disponible." }) },,
                 confirmButton = {
                     TextButton(onClick = { updateInfo = null }) { Text("OK") }
                 }
