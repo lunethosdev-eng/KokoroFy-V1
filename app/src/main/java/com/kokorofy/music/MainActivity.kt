@@ -1,5 +1,7 @@
 package com.kokorofy.music
 
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 import androidx.compose.foundation.lazy.LazyListState
 
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -35,6 +37,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -189,7 +192,6 @@ fun KokoroFyTheme(dark: Boolean, content: @Composable () -> Unit) {
 }
 
 @Composable
-@Composable
 private fun GlassCard(
     modifier: Modifier = Modifier,
     dark: Boolean = true,
@@ -211,7 +213,7 @@ fun KokoroFyApp(
     val context = LocalContext.current
     val repo = remember { CatalogRepository(context) }
     val scope = rememberCoroutineScope()
-    val songs by repo.songs.collectAsState()
+    val songs by repo.songs.collectAsState(initial = emptyList())
     var controller by remember { mutableStateOf<MediaController?>(null) }
     var current by remember { mutableStateOf<Song?>(null) }
     var showPlayer by remember { mutableStateOf(false) }
@@ -222,7 +224,7 @@ fun KokoroFyApp(
     var query by remember { mutableStateOf("") }
     var remoteSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
     var searchingRemote by remember { mutableStateOf(false) }
-    val downloadProgress by OfflineManager.progress.collectAsState()
+    val downloadProgress by OfflineManager.progress.collectAsState(initial = OfflineManager.Progress())
     var tab by remember { mutableIntStateOf(0) }
     var lyrics by remember { mutableStateOf<String?>(null) }
     var playing by remember { mutableStateOf(false) }
@@ -625,7 +627,7 @@ private fun LibraryScreen(
 }
 
 @Composable
-private fun LibraryPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
+private fun RowScope.LibraryPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
     GlassCard(Modifier.weight(1f), dark = MaterialTheme.colorScheme.background == Ink) {
         Icon(icon, null, tint = SpotifyGreen)
         Spacer(Modifier.height(8.dp))
@@ -928,7 +930,6 @@ private fun FullPlayer(
     }
 }
 
-private data class LyricLine(val timeMs: Long, val text: String)
 
 private fun parseLyrics(raw: String?): List<LyricLine> {
     if (raw.isNullOrBlank()) return emptyList()
@@ -1071,7 +1072,6 @@ private fun EqualizerCard(dark: Boolean) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QueueSheet(
     songs: List<Song>,
