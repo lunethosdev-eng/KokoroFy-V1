@@ -1,6 +1,6 @@
-package com.kokorofy.music
-
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
+package com.kokorofy.music
 
 import androidx.compose.foundation.lazy.LazyListState
 
