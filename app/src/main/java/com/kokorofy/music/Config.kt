@@ -5,11 +5,10 @@ object Config {
     const val SUPABASE_PUBLISHABLE_KEY = "sb_publishable_N5me2DAs7TrngbvqkkbqsA_UGGakGAL"
     const val SONGS_TABLE = "songs"
 
-    /** URL pública de tu servicio Seki en Render (sin barra final). */
-    const val SEKI_API_URL = "https://seki-xxxxx.onrender.com"
+    const val SEKI_API_URL = "https://sekii-1.onrender.com"
 
-    /** Si pusiste API_SECRET en Render, ponlo aquí. Si no, déjalo vacío. */
-    const val SEKI_API_KEY = ""
+    /** Misma clave que API_SECRET en Render. Si la borras allá, déjala vacía. */
+    const val SEKI_API_KEY = "kokoro-seki-2026"
 
     const val LRCLIB_BASE = "https://lrclib.net/api/get"
 }
