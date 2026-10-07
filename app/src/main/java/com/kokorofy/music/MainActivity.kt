@@ -20,6 +20,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,7 +55,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 object BuildConfigVersion {
-    const val NAME = "1.4.1"
+    const val NAME = "1.5.0"
 }
 
 class MainActivity : ComponentActivity() {
@@ -78,8 +79,9 @@ class MainActivity : ComponentActivity() {
 
 /* ─── Colors ─── */
 private val Purple = Color(0xFF8B7CFF)
+private val SpotGreen = Color(0xFF1ED760)
 private val LightBg = Color(0xFFF2F0F8)
-private val DarkBg = Color(0xFF0B0B0F)
+private val DarkBg = Color(0xFF0A0A0C)
 
 @Composable
 fun KokoroTheme(dark: Boolean, content: @Composable () -> Unit) {
@@ -105,42 +107,58 @@ fun KokoroTheme(dark: Boolean, content: @Composable () -> Unit) {
     )
 }
 
-/** Liquid glass — se adapta a light/dark */
+/** Liquid Glass iOS26 / Spotify concept — frosted, borde fino, highlight */
 @Composable
 fun LiquidGlass(
     modifier: Modifier = Modifier,
     corner: RoundedCornerShape = RoundedCornerShape(22.dp),
+    intense: Boolean = false,
     content: @Composable BoxScope.() -> Unit
 ) {
     val dark = MaterialTheme.colorScheme.background == DarkBg
-    val body = if (dark) {
-        listOf(Color(0x44FFFFFF), Color(0x22FFFFFF), Color(0x188B7CFF))
-    } else {
-        listOf(Color(0xF0FFFFFF), Color(0xCCFFFFFF), Color(0x99E8E4FF))
+    val fill = when {
+        dark && intense -> Color(0xCC1A1A20)
+        dark -> Color(0x9916161C)
+        intense -> Color(0xF0FFFFFF)
+        else -> Color(0xCCFFFFFF)
     }
-    val border = if (dark) {
-        listOf(Color(0x66FFFFFF), Color(0x22FFFFFF), Color(0x558B7CFF))
-    } else {
-        listOf(Color(0xAAFFFFFF), Color(0x33FFFFFF), Color(0x66C4B5FD))
-    }
+    val edge = if (dark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.55f)
+    val shine = if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.40f)
     Box(
         modifier
             .clip(corner)
-            .background(Brush.linearGradient(body, Offset.Zero, Offset(800f, 1200f)))
-            .border(1.dp, Brush.linearGradient(border), corner)
+            .background(fill)
+            .border(0.8.dp, edge, corner)
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(if (dark) 24.dp else 32.dp)
+                .height(26.dp)
                 .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = if (dark) 0.18f else 0.35f), Color.Transparent)
-                    )
-                )
+                .background(Brush.verticalGradient(listOf(shine, Color.Transparent)))
         )
         content()
+    }
+}
+
+@Composable
+fun GlassChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val bg = if (selected) Color(0xFF1ED760) else Color.White.copy(alpha = 0.08f)
+    val fg = if (selected) Color.Black else Color.White.copy(alpha = 0.92f)
+    Box(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .border(0.8.dp, if (selected) Color(0xFF1ED760) else Color.White.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(text, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -186,8 +204,10 @@ fun KokoroFyRoot(dark: Boolean, onDarkChange: (Boolean) -> Unit) {
     var showAddToPlaylist by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<AppUpdate?>(null) }
     var showChangelog by remember { mutableStateOf(false) }
-    var accentColor by remember { mutableStateOf(Purple) }
+    var accentColor by remember { mutableStateOf(SpotGreen) }
     var reduceMotion by remember { mutableStateOf(Prefs.reduceMotion(context)) }
+    val downloadProgress by OfflineManager.progress.collectAsState()
+    var homeFilter by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         val accents = listOf(
@@ -358,6 +378,7 @@ fun KokoroFyRoot(dark: Boolean, onDarkChange: (Boolean) -> Unit) {
             .fillMaxSize()
             .background(cs.background)
     ) {
+        DownloadProgressOverlay(downloadProgress)
         Scaffold(
             containerColor = Color.Transparent,
             bottomBar = {
@@ -386,8 +407,9 @@ fun KokoroFyRoot(dark: Boolean, onDarkChange: (Boolean) -> Unit) {
                     LiquidGlass(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        corner = RoundedCornerShape(28.dp)
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        corner = RoundedCornerShape(28.dp),
+                        intense = true
                     ) {
                         NavigationBar(
                             containerColor = Color.Transparent,
@@ -426,7 +448,9 @@ fun KokoroFyRoot(dark: Boolean, onDarkChange: (Boolean) -> Unit) {
                 when (tab) {
                     0 -> HomeScreen(
                         songs = songs,
-                        current = current,
+                        playlists = playlists,
+                        filter = homeFilter,
+                        onFilter = { homeFilter = it },
                         accent = accentColor,
                         onPlay = { playSong(it, songs) },
                         onDownload = { OfflineManager.download(context, it) }
@@ -608,106 +632,167 @@ fun KokoroFyRoot(dark: Boolean, onDarkChange: (Boolean) -> Unit) {
 @Composable
 fun HomeScreen(
     songs: List<Song>,
-    current: Song?,
+    playlists: List<Playlist>,
+    filter: Int,
+    onFilter: (Int) -> Unit,
     accent: Color,
     onPlay: (Song) -> Unit,
     onDownload: (Song) -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
-    val similar = remember(current?.id, songs) {
-        if (current == null) emptyList()
-        else try {
-            Recommend.similar(current, songs, 8)
-        } catch (_: Throwable) {
-            songs.filter { it.artist.equals(current.artist, true) && it.id != current.id }.take(8)
-        }
-    }
-    var visible by remember { mutableIntStateOf(16) }
-    LaunchedEffect(songs.size) {
-        visible = 16
-        while (visible < songs.size) {
-            kotlinx.coroutines.delay(60)
-            visible = (visible + 12).coerceAtMost(songs.size)
-        }
-    }
-    val shown = songs.take(visible)
+    val featured = songs.firstOrNull()
+    val recent = songs.take(12)
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(
-                    model = R.drawable.kokorofy_icon,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                )
-                Spacer(Modifier.width(10.dp))
-                Text("KokoroFy", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = cs.onBackground)
-            }
-            Spacer(Modifier.height(18.dp))
-            Text("PARA TI", fontSize = 11.sp, color = cs.onBackground.copy(alpha = 0.45f), fontWeight = FontWeight.Bold)
-            Text(
-                "Escucha lo que te gusta.",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = cs.onBackground,
-                letterSpacing = (-0.6).sp
-            )
-            Text("Catálogo · ${shown.size}/${songs.size}", fontSize = 12.sp, color = cs.onBackground.copy(alpha = 0.45f))
             Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    Modifier.size(32.dp).clip(CircleShape).background(accent.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("K", fontWeight = FontWeight.Bold, color = cs.onBackground, fontSize = 14.sp)
+                }
+                GlassChip("All", filter == 0, { onFilter(0) })
+                GlassChip("Music", filter == 1, { onFilter(1) })
+                Spacer(Modifier.weight(1f))
+                Icon(Icons.Filled.Notifications, null, tint = cs.onBackground.copy(alpha = 0.7f), modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.height(16.dp))
         }
 
-        if (similar.isNotEmpty()) {
-            item {
-                Text(
-                    "SIMILAR A LO QUE ESCUCHAS",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = cs.onBackground.copy(alpha = 0.45f),
-                    modifier = Modifier.padding(top = 8.dp, bottom = 6.dp)
-                )
+        item {
+            val cards = buildList {
+                add(Triple("Liked Songs", songs.firstOrNull()?.coverUrl, true))
+                playlists.take(3).forEach { add(Triple(it.name, it.coverUrl ?: songs.firstOrNull()?.coverUrl, false)) }
+                songs.take(4).forEach { add(Triple(it.title, it.coverUrl, false)) }
             }
-            items(similar, key = { "sim_${it.id}" }) { song ->
-                TrackRow(song, accent, { onPlay(song) }, { onDownload(song) })
-            }
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "TODO EL CATÁLOGO",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = cs.onBackground.copy(alpha = 0.45f),
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-            }
-        }
-
-        if (songs.isEmpty()) {
-            item {
-                Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = accent)
+            Column(Modifier.padding(horizontal = 14.dp)) {
+                cards.chunked(2).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { (title, cover, liked) ->
+                            LiquidGlass(
+                                modifier = Modifier.weight(1f).height(56.dp).clickable {
+                                    songs.firstOrNull { s -> s.title == title || liked }?.let(onPlay)
+                                        ?: songs.firstOrNull()?.let(onPlay)
+                                },
+                                corner = RoundedCornerShape(10.dp),
+                                intense = true
+                            ) {
+                                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier.width(56.dp).fillMaxHeight().background(
+                                            if (liked) accent else cs.surface
+                                        )
+                                    ) {
+                                        if (!liked && cover != null) {
+                                            AsyncImage(model = cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                        } else if (liked) {
+                                            Icon(Icons.Filled.Favorite, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(22.dp))
+                                        }
+                                    }
+                                    Text(
+                                        title,
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = cs.onBackground
+                                    )
+                                }
+                            }
+                        }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         }
 
-        items(shown, key = { it.id }) { song ->
-            TrackRow(song, accent, { onPlay(song) }, { onDownload(song) })
-        }
-
-        if (visible < songs.size) {
+        if (featured != null) {
             item {
-                Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = accent)
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    AsyncImage(
+                        model = featured.coverUrl,
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text("New release from", fontSize = 11.sp, color = cs.onBackground.copy(alpha = 0.5f))
+                        Text(featured.artist, fontWeight = FontWeight.Bold, color = cs.onBackground, fontSize = 14.sp)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                LiquidGlass(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).clickable { onPlay(featured) },
+                    corner = RoundedCornerShape(18.dp),
+                    intense = true
+                ) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(
+                            model = featured.coverUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(88.dp).clip(RoundedCornerShape(12.dp))
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Single", fontSize = 11.sp, color = cs.onBackground.copy(alpha = 0.5f))
+                            Text(featured.title, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = cs.onBackground, maxLines = 2)
+                            Text(featured.artist, fontSize = 13.sp, color = cs.onBackground.copy(alpha = 0.6f))
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                GlassIconButton(onClick = { onDownload(featured) }) {
+                                    Icon(Icons.Filled.Add, null, tint = cs.onBackground, modifier = Modifier.size(18.dp))
+                                }
+                                GlassIconButton(onClick = { onPlay(featured) }) {
+                                    Icon(Icons.Filled.PlayArrow, null, tint = accent, modifier = Modifier.size(22.dp))
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        item { Spacer(Modifier.height(8.dp)) }
+        item {
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "New releases for you",
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp,
+                color = cs.onBackground,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Spacer(Modifier.height(12.dp))
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(recent, key = { it.id }) { song ->
+                    Column(Modifier.width(140.dp).clickable { onPlay(song) }) {
+                        AsyncImage(
+                            model = song.coverUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(140.dp).clip(RoundedCornerShape(12.dp)).background(cs.surface)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onBackground, fontSize = 13.sp)
+                        Text(song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onBackground.copy(alpha = 0.55f), fontSize = 12.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
     }
 }
 
@@ -1146,7 +1231,8 @@ fun MiniPlayer(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onOpen),
-            corner = RoundedCornerShape(18.dp)
+            corner = RoundedCornerShape(16.dp),
+            intense = true
         ) {
             Row(
                 Modifier.padding(10.dp),
