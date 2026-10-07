@@ -43,6 +43,11 @@ object OfflineManager {
     fun isOffline(context: Context, songId: String): Boolean =
         localFile(context, songId).exists()
 
+    fun offlineCount(context: Context): Int {
+        val dir = File(context.filesDir, "offline")
+        return dir.listFiles()?.count { it.isFile && it.extension == "mp3" } ?: 0
+    }
+
     fun playUri(context: Context, song: Song): String {
         val f = localFile(context, song.id)
         return if (f.exists()) f.toURI().toString() else song.audioUrl
