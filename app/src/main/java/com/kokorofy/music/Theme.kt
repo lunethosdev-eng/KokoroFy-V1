@@ -141,11 +141,15 @@ fun LiquidGlass(
                             change.consume()
                             val nextX = (offsetX.value + amount.x * 0.62f).coerceIn(-48f, 48f)
                             val nextY = (offsetY.value + amount.y * 0.62f).coerceIn(-48f, 48f)
-                            offsetX.snapTo(nextX)
-                            offsetY.snapTo(nextY)
+                            scope.launch {
+                                offsetX.snapTo(nextX)
+                                offsetY.snapTo(nextY)
+                            }
                             val edgeX = abs(nextX) / 48f
                             val edgeY = abs(nextY) / 48f
-                            stretch.snapTo(maxOf(edgeX, edgeY).coerceIn(0f, 1f))
+                            scope.launch {
+                                stretch.snapTo(maxOf(edgeX, edgeY).coerceIn(0f, 1f))
+                            }
                         },
                         onDragEnd = {
                             scope.launch {
