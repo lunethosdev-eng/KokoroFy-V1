@@ -2,18 +2,13 @@
 
 package com.kokorofy.music
 
-import androidx.compose.foundation.lazy.LazyListState
-
-import androidx.compose.material3.OutlinedTextFieldDefaults
-
-import androidx.compose.material3.CircularProgressIndicator
-
 import android.content.ComponentName
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -24,12 +19,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,30 +32,24 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Cached
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Equalizer
@@ -77,29 +63,25 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.Button
-import androidx.compose.material3.Divider
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -111,16 +93,16 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -128,22 +110,25 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.max
 
 private val SpotifyGreen = Color(0xFF1ED760)
@@ -153,14 +138,15 @@ private val DarkSurface2 = Color(0xFF141416)
 private val LightBg = Color(0xFFF5F5F7)
 private val LightSurface = Color(0xFFFFFFFF)
 
+data class LyricLine(val timeMs: Long, val text: String)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Edge-to-edge: elimina los bordes blancos de status/nav bar
-        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
-        val insets = androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
+        val insets = WindowInsetsControllerCompat(window, window.decorView)
         insets.isAppearanceLightStatusBars = false
         insets.isAppearanceLightNavigationBars = false
         setContent {
@@ -196,6 +182,36 @@ fun KokoroFyTheme(dark: Boolean, content: @Composable () -> Unit) {
         )
     }
     MaterialTheme(colorScheme = scheme, content = content)
+}
+
+@Composable
+fun LiquidGlass(
+    modifier: Modifier = Modifier,
+    dark: Boolean = true,
+    corner: Shape = RoundedCornerShape(22.dp),
+    interactive: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val surfaceColor = if (dark) {
+        Color.White.copy(alpha = 0.07f)
+    } else {
+        Color.White.copy(alpha = 0.65f)
+    }
+    val borderColor = if (dark) {
+        Color.White.copy(alpha = 0.15f)
+    } else {
+        Color.Black.copy(alpha = 0.08f)
+    }
+
+    Surface(
+        modifier = modifier
+            .clip(corner)
+            .border(1.dp, borderColor, corner),
+        color = surfaceColor,
+        shape = corner
+    ) {
+        content()
+    }
 }
 
 @Composable
@@ -246,13 +262,12 @@ fun KokoroFyApp(
     var shuffle by remember { mutableStateOf(false) }
     var repeat by remember { mutableStateOf(false) }
 
-    // Conectar MediaController SIN bloquear el hilo principal (evita ANR)
     DisposableEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
         future.addListener({
             runCatching { controller = future.get() }
-        }, androidx.core.content.ContextCompat.getMainExecutor(context))
+        }, ContextCompat.getMainExecutor(context))
         onDispose {
             runCatching { future.cancel(true) }
             controller?.release()
@@ -264,14 +279,13 @@ fun KokoroFyApp(
         runCatching { repo.refresh() }
     }
 
-    // Búsqueda remota con Seki: si no hay resultados locales, busca y descarga on-demand
     LaunchedEffect(query) {
         if (query.length < 2) {
             remoteSongs = emptyList()
             searchingRemote = false
             return@LaunchedEffect
         }
-        delay(450) // debounce
+        delay(450)
         val localMatch = songs.any {
             "${it.title} ${it.artist} ${it.album}".contains(query, ignoreCase = true)
         }
@@ -281,7 +295,6 @@ fun KokoroFyApp(
             return@LaunchedEffect
         }
         searchingRemote = true
-        // Seki funciona mejor con queries cortas; si pegan un link, pásalo tal cual
         val q = when {
             query.startsWith("http") -> query.trim()
             query.length > 48 -> query.take(48).trim()
@@ -290,15 +303,12 @@ fun KokoroFyApp(
         val results = runCatching { SekiClient.search(q) }.getOrDefault(emptyList())
         remoteSongs = results
         searchingRemote = false
-        // Auto-upsert a Room y auto-descarga del primero si hay resultados
         if (results.isNotEmpty()) {
             runCatching { repo.upsertAll(results) }
-            // Iniciar descarga automática del primer resultado (el más relevante)
             OfflineManager.download(context, results.first())
         }
     }
 
-    // Actualizar posición solo cuando reproduce (sin while agresivo)
     LaunchedEffect(controller, current?.id) {
         val c = controller ?: return@LaunchedEffect
         while (true) {
@@ -323,11 +333,11 @@ fun KokoroFyApp(
                     .setMediaId(song.id)
                     .setUri(song.audioUrl)
                     .setMediaMetadata(
-                        androidx.media3.common.MediaMetadata.Builder()
+                        MediaMetadata.Builder()
                             .setTitle(song.title)
                             .setArtist(song.artist)
                             .setAlbumTitle(song.album)
-                            .setArtworkUri(song.coverUrl?.let(android.net.Uri::parse))
+                            .setArtworkUri(song.coverUrl?.let(Uri::parse))
                             .build()
                     ).build()
             )
@@ -336,19 +346,18 @@ fun KokoroFyApp(
         }
     }
 
-
     fun shareSong(song: Song) {
         val text = buildString {
             append("Escucha \"${song.title}\" de ${song.artist}")
             if (song.audioUrl.isNotBlank()) append("\n${song.audioUrl}")
             append("\n\n— vía KokoroFy")
         }
-        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(android.content.Intent.EXTRA_TEXT, text)
-            putExtra(android.content.Intent.EXTRA_SUBJECT, "${song.title} — ${song.artist}")
+            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra(Intent.EXTRA_SUBJECT, "${song.title} — ${song.artist}")
         }
-        context.startActivity(android.content.Intent.createChooser(intent, "Compartir canción"))
+        context.startActivity(Intent.createChooser(intent, "Compartir canción"))
     }
 
     fun loadLyrics() {
@@ -403,128 +412,163 @@ fun KokoroFyApp(
     }
 
     Box(Modifier.fillMaxSize()) {
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            HomeTopBar(
-                tab = tab,
-                dark = dark,
-                onSettings = { showSettings = true },
-                onEq = { showEq = !showEq }
-            )
-        },
-        bottomBar = {
-            Column {
-                AnimatedVisibility(
-                    visible = current != null,
-                    enter = slideInVertically { it } + fadeIn(),
-                    exit = slideOutVertically { it } + fadeOut()
-                ) {
-                    current?.let {
-                        MiniPlayer(
-                            song = it,
-                            playing = playing,
-                            dark = dark,
-                            onOpen = { showPlayer = true },
-                            onPlayPause = { if (playing) controller?.pause() else controller?.play() },
-                            onNext = { controller?.seekToNextMediaItem() }
-                        )
-                    }
-                }
-                // Nav flotante Liquid Glass, rounded, separado del borde inferior
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 10.dp)
-                ) {
-                    LiquidGlass(
-                        modifier = Modifier.fillMaxWidth(),
-                        dark = dark,
-                        corner = RoundedCornerShape(28.dp),
-                        interactive = false
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                HomeTopBar(
+                    tab = tab,
+                    dark = dark,
+                    onSettings = { showSettings = true },
+                    onEq = { showEq = !showEq }
+                )
+            },
+            bottomBar = {
+                Column {
+                    AnimatedVisibility(
+                        visible = current != null,
+                        enter = slideInVertically { it } + fadeIn(),
+                        exit = slideOutVertically { it } + fadeOut()
                     ) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(62.dp)
-                                .padding(horizontal = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
+                        current?.let {
+                            MiniPlayer(
+                                song = it,
+                                playing = playing,
+                                dark = dark,
+                                onOpen = { showPlayer = true },
+                                onPlayPause = { if (playing) controller?.pause() else controller?.play() },
+                                onNext = { controller?.seekToNextMediaItem() }
+                            )
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    ) {
+                        LiquidGlass(
+                            modifier = Modifier.fillMaxWidth(),
+                            dark = dark,
+                            corner = RoundedCornerShape(28.dp),
+                            interactive = false
                         ) {
-                            listOf(
-                                Triple(0, Icons.Default.Home, "Inicio"),
-                                Triple(1, Icons.Default.Search, "Buscar"),
-                                Triple(2, Icons.Default.LibraryMusic, "Biblioteca")
-                            ).forEach { (i, icon, name) ->
-                                val selected = tab == i
-                                Column(
-                                    Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .clickable { tab = i }
-                                        .padding(vertical = 8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Icon(
-                                        icon,
-                                        contentDescription = name,
-                                        tint = if (selected) SpotifyGreen else Color.White.copy(alpha = 0.45f),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        name,
-                                        fontSize = 10.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (selected) SpotifyGreen else Color.White.copy(alpha = 0.45f)
-                                    )
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(62.dp)
+                                    .padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf(
+                                    Triple(0, Icons.Default.Home, "Inicio"),
+                                    Triple(1, Icons.Default.Search, "Buscar"),
+                                    Triple(2, Icons.Default.LibraryMusic, "Biblioteca")
+                                ).forEach { (i, icon, name) ->
+                                    val selected = tab == i
+                                    Column(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .clickable { tab = i }
+                                            .padding(vertical = 8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(
+                                            icon,
+                                            contentDescription = name,
+                                            tint = if (selected) SpotifyGreen else Color.White.copy(alpha = 0.45f),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            name,
+                                            fontSize = 10.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (selected) SpotifyGreen else Color.White.copy(alpha = 0.45f)
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+        ) { pad ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(pad)
+                    .padding(horizontal = 18.dp)
+            ) {
+                when (tab) {
+                    0 -> HomeScreen(
+                        songs = songs,
+                        dark = dark,
+                        showEq = showEq,
+                        onPlay = ::play,
+                        onDownload = { OfflineManager.download(context, it) }
+                    )
+                    1 -> SearchScreen(
+                        songs = (songs.filter {
+                            "${it.title} ${it.artist} ${it.album}".contains(query, true)
+                        } + remoteSongs).distinctBy { it.id },
+                        query = query,
+                        dark = dark,
+                        searching = searchingRemote,
+                        onQuery = { query = it },
+                        onPlay = ::play,
+                        onDownload = { OfflineManager.download(context, it) }
+                    )
+                    else -> LibraryScreen(
+                        songs = songs,
+                        dark = dark,
+                        onPlay = ::play,
+                        onDownload = { OfflineManager.download(context, it) }
+                    )
+                }
+            }
         }
-    ) { pad ->
-        Column(
-            Modifier.fillMaxSize()
-                .padding(pad)
-                .padding(horizontal = 18.dp)
+
+        if (showQueue) {
+            QueueSheet(songs = songs, dark = dark, onPlay = ::play, onClose = { showQueue = false })
+        }
+        DownloadProgressOverlay(downloadProgress)
+    }
+}
+
+@Composable
+private fun DownloadProgressOverlay(progress: OfflineManager.Progress) {
+    if (progress.isDownloading) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = 90.dp),
+            contentAlignment = Alignment.BottomCenter
         ) {
-            when (tab) {
-                0 -> HomeScreen(
-                    songs = songs,
-                    dark = dark,
-                    showEq = showEq,
-                    onPlay = ::play,
-                    onDownload = { OfflineManager.download(context, it) }
-                )
-                1 -> SearchScreen(
-                    songs = (songs.filter {
-                        "${it.title} ${it.artist} ${it.album}".contains(query, true)
-                    } + remoteSongs).distinctBy { it.id },
-                    query = query,
-                    dark = dark,
-                    searching = searchingRemote,
-                    onQuery = { query = it },
-                    onPlay = ::play,
-                    onDownload = { OfflineManager.download(context, it) }
-                )
-                else -> LibraryScreen(
-                    songs = songs,
-                    dark = dark,
-                    onPlay = ::play,
-                    onDownload = { OfflineManager.download(context, it) }
-                )
+            Surface(
+                color = Color.Black.copy(alpha = 0.85f),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = SpotifyGreen,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Descargando… ${(progress.progress * 100).toInt()}%",
+                        color = Color.White,
+                        fontSize = 13.sp
+                    )
+                }
             }
         }
     }
-
-    if (showQueue) {
-        QueueSheet(songs = songs, dark = dark, onPlay = ::play, onClose = { showQueue = false })
-    }
-    DownloadProgressOverlay(downloadProgress)
-    } // end Box
 }
 
 @Composable
@@ -589,7 +633,7 @@ private fun HomeScreen(
                 Text("Escuchado recientemente", fontWeight = FontWeight.Bold, fontSize = 19.sp)
                 Spacer(Modifier.height(10.dp))
                 Row(
-                    Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                    Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     songs.take(6).forEach { song ->
@@ -637,7 +681,7 @@ private fun SearchScreen(
     onDownload: (Song) -> Unit
 ) {
     Column(Modifier.fillMaxSize()) {
-        androidx.compose.material3.OutlinedTextField(
+        OutlinedTextField(
             value = query,
             onValueChange = onQuery,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 14.dp),
@@ -645,7 +689,7 @@ private fun SearchScreen(
             leadingIcon = { Icon(Icons.Default.Search, null) },
             placeholder = { Text("Artistas, canciones o álbumes") },
             shape = RoundedCornerShape(18.dp),
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+            colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = SpotifyGreen,
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline
             )
@@ -656,7 +700,7 @@ private fun SearchScreen(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                androidx.compose.material3.CircularProgressIndicator(
+                CircularProgressIndicator(
                     modifier = Modifier.size(22.dp),
                     color = SpotifyGreen,
                     strokeWidth = 2.5.dp
@@ -703,7 +747,7 @@ private fun LibraryScreen(
 }
 
 @Composable
-private fun RowScope.LibraryPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
+private fun RowScope.LibraryPill(icon: ImageVector, label: String) {
     GlassCard(Modifier.weight(1f), dark = MaterialTheme.colorScheme.background == Ink) {
         Icon(icon, null, tint = SpotifyGreen)
         Spacer(Modifier.height(8.dp))
@@ -835,6 +879,7 @@ private fun FullPlayer(
     onRepeat: () -> Unit,
     onLyrics: () -> Unit,
     onDownload: () -> Unit,
+    onShare: () -> Unit,
     onSeek: (Long) -> Unit
 ) {
     val parsed = remember(lyrics) { parseLyrics(lyrics) }
@@ -850,7 +895,6 @@ private fun FullPlayer(
     }
 
     Box(Modifier.fillMaxSize().background(if (dark) Color.Black else Color(0xFFF2F2F7))) {
-        // Portada de fondo (estilo Spotify) — visible y con scrim oscuro/claro
         AsyncImage(
             model = song.coverUrl ?: R.drawable.kokorofy_icon,
             contentDescription = null,
@@ -949,7 +993,7 @@ private fun FullPlayer(
                     ) {
                         itemsIndexed(parsed) { index, line ->
                             val isActive = index == activeLine
-                            val dist = kotlin.math.abs(index - activeLine)
+                            val dist = abs(index - activeLine)
                             Text(
                                 line.text,
                                 fontSize = when {
@@ -1042,7 +1086,6 @@ private fun FullPlayer(
     }
 }
 
-
 private fun parseLyrics(raw: String?): List<LyricLine> {
     if (raw.isNullOrBlank()) return emptyList()
     val result = mutableListOf<LyricLine>()
@@ -1127,7 +1170,7 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
 
 @Composable
 private fun SettingRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     title: String,
     subtitle: String,
     trailing: @Composable () -> Unit
