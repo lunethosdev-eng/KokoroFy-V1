@@ -93,8 +93,12 @@ object Prefs {
     fun sortMode(c: Context) = sp(c).getInt("sort", 0) // 0 recent 1 title 2 artist
     fun setSortMode(c: Context, v: Int) = sp(c).edit().putInt("sort", v).apply()
 
-    fun themeMode(c: Context) = sp(c).getInt("theme", 0) // 0 system-ish light 1 pure dark bg
+    /** 0 = light, 1 = dark */
+    fun themeMode(c: Context) = sp(c).getInt("theme", 1)
     fun setThemeMode(c: Context, v: Int) = sp(c).edit().putInt("theme", v).apply()
+
+    fun isDark(c: Context) = themeMode(c) == 1
+    fun setDark(c: Context, v: Boolean) = setThemeMode(c, if (v) 1 else 0)
 
     // ── Privacy (10) ──
     fun analyticsOff(c: Context) = sp(c).getBoolean("priv_analytics", true)
@@ -133,13 +137,8 @@ object Prefs {
         sp(c).edit().putString("changelog_ver", v).apply()
 
     fun clearPrivacyData(c: Context) {
-        // does not wipe catalog; clears sensitive prefs flags optional
         sp(c).edit()
             .remove("priv_session")
             .apply()
     }
 }
-fun isDark(c: Context) = sp(c).getBoolean("dark_mode", false)
-fun setDark(c: Context, v: Boolean) = sp(c).edit().putBoolean("dark_mode", v).apply()
-fun isDark(c: Context) = sp(c).getBoolean("dark_mode", false)
-fun setDark(c: Context, v: Boolean) = sp(c).edit().putBoolean("dark_mode", v).apply()
