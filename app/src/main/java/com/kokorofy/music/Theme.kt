@@ -6,15 +6,12 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -29,24 +26,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
-/** Paleta Spotify — sin púrpura, sin blancos agresivos. */
 object KColors {
     val Green = Color(0xFF1ED760)
     val GreenDark = Color(0xFF1DB954)
-
     val Bg = Color(0xFF000000)
-    val BgElevated = Color(0xFF0A0A0C)
     val Surface = Color(0xFF121214)
-    val Surface2 = Color(0xFF1A1A1E)
-
     val LightBg = Color(0xFFF5F5F7)
     val LightSurface = Color(0xFFFFFFFF)
-
     val Text = Color(0xFFF5F5F7)
     val TextDark = Color(0xFF0A0A0C)
     val Muted = Color(0xFF8E8E93)
@@ -87,79 +76,49 @@ fun KokoroLightTheme(content: @Composable () -> Unit) {
 }
 
 /**
- * Liquid Glass sutil — dark mode real.
- * Sin gradientes blancos pesados. Solo un velo oscuro + borde fino.
- * Animación: al arrastrar se deforma (offset + scale) y al soltar vuelve con spring bouncy.
+ * Liquid Glass sutil + bouncy press.
+ * Sin drag continuo (evita freezes). Solo escala al tocar y vuelve con spring.
+ * Color sólido semitransparente, sin gradientes blancos.
  */
 @Composable
 fun LiquidGlass(
     modifier: Modifier = Modifier,
     dark: Boolean = true,
     corner: RoundedCornerShape = RoundedCornerShape(22.dp),
-    interactive: Boolean = true,
+    interactive: Boolean = false,
     content: @Composable BoxScope.() -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val offsetX = remember { Animatable(0f) }
-    val offsetY = remember { Animatable(0f) }
     val scale = remember { Animatable(1f) }
-
-    val body = if (dark) Color(0xFF1C1C1E).copy(alpha = 0.72f) else Color.White.copy(alpha = 0.78f)
-    val borderColor = if (dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
-
+    val body = if (dark) Color(0xFF1C1C1E).copy(alpha = 0.78f) else Color.White.copy(alpha = 0.82f)
+    val borderColor = if (dark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.06f)
     val springSpec = spring<Float>(
         dampingRatio = Spring.DampingRatioMediumBouncy,
-        stiffness = Spring.StiffnessLow
+        stiffness = Spring.StiffnessMediumLow
     )
 
     Box(
         modifier
-            .graphicsLayer {
-                translationX = offsetX.value
-                translationY = offsetY.value
-                scaleX = scale.value
-                scaleY = scale.value
-            }
+            .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
             .then(
                 if (interactive) Modifier.pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = {
-                            scope.launch { scale.animateTo(1.04f, springSpec) }
-                        },
-                        onDragEnd = {
-                            scope.launch {
-                                launch { offsetX.animateTo(0f, springSpec) }
-                                launch { offsetY.animateTo(0f, springSpec) }
-                                launch { scale.animateTo(1f, springSpec) }
-                            }
-                        },
-                        onDragCancel = {
-                            scope.launch {
-                                launch { offsetX.animateTo(0f, springSpec) }
-                                launch { offsetY.animateTo(0f, springSpec) }
-                                launch { scale.animateTo(1f, springSpec) }
-                            }
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            // efecto "gota": el desplazamiento se amortigua (líquido)
-                            scope.launch {
-                                offsetX.snapTo((offsetX.value + dragAmount.x * 0.35f).coerceIn(-28f, 28f))
-                                offsetY.snapTo((offsetY.value + dragAmount.y * 0.35f).coerceIn(-28f, 28f))
-                            }
+                    detectTapGestures(
+                        onPress = {
+                            scope.launch { scale.animateTo(0.96f, springSpec) }
+                            tryAwaitRelease()
+                            scope.launch { scale.animateTo(1f, springSpec) }
                         }
                     )
                 } else Modifier
             )
             .clip(corner)
             .background(body)
-            .border(width = 0.8.dp, color = borderColor, shape = corner)
+            .border(width = 0.7.dp, color = borderColor, shape = corner)
     ) {
         content()
     }
 }
 
-/** Alias */
 @Composable
 fun DarkGlass(
     modifier: Modifier = Modifier,
@@ -180,7 +139,7 @@ fun GlassButton(
         modifier = modifier.clickable(onClick = onClick),
         dark = dark,
         corner = RoundedCornerShape(16.dp),
-        interactive = false
+        interactive = true
     ) {
         Row(
             Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
