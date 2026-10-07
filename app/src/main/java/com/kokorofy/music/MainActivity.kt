@@ -156,6 +156,13 @@ private val LightSurface = Color(0xFFFFFFFF)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Edge-to-edge: elimina los bordes blancos de status/nav bar
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        val insets = androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
+        insets.isAppearanceLightStatusBars = false
+        insets.isAppearanceLightNavigationBars = false
         setContent {
             var dark by rememberSaveable { mutableStateOf(true) }
             KokoroFyTheme(dark) { KokoroFyApp(dark = dark, onDarkChange = { dark = it }) }
@@ -195,9 +202,15 @@ fun KokoroFyTheme(dark: Boolean, content: @Composable () -> Unit) {
 private fun GlassCard(
     modifier: Modifier = Modifier,
     dark: Boolean = true,
+    interactive: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    LiquidGlass(modifier = modifier, dark = dark, corner = RoundedCornerShape(22.dp)) {
+    LiquidGlass(
+        modifier = modifier,
+        dark = dark,
+        corner = RoundedCornerShape(22.dp),
+        interactive = interactive
+    ) {
         Column(
             Modifier.padding(16.dp),
             content = content
@@ -271,14 +284,17 @@ fun KokoroFyApp(
         }
     }
 
-    LaunchedEffect(controller, current?.id) {
+    LaunchedEffect(controller, current?.id, playing) {
         while (true) {
             controller?.let {
-                playing = it.isPlaying
-                position = it.currentPosition.coerceAtLeast(0L)
-                duration = it.duration.takeIf { d -> d > 0 } ?: current?.duration?.takeIf { d -> d > 0 } ?: 1L
+                val isPlaying = it.isPlaying
+                if (playing != isPlaying) playing = isPlaying
+                if (isPlaying) {
+                    position = it.currentPosition.coerceAtLeast(0L)
+                    duration = it.duration.takeIf { d -> d > 0 } ?: current?.duration?.takeIf { d -> d > 0 } ?: 1L
+                }
             }
-            delay(250)
+            delay(if (playing) 400 else 1200)
         }
     }
 
@@ -687,7 +703,8 @@ private fun MiniPlayer(
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .clickable { onOpen() },
         dark = dark,
-        corner = RoundedCornerShape(20.dp)
+        corner = RoundedCornerShape(20.dp),
+        interactive = true
     ) {
         Row(
             Modifier
@@ -777,7 +794,7 @@ private fun FullPlayer(
             model = song.coverUrl ?: R.drawable.kokorofy_icon,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize().blur(42.dp).alpha(if (dark) .34f else .18f)
+            modifier = Modifier.fillMaxSize().alpha(if (dark) .22f else .12f)
         )
         Box(
             Modifier.fillMaxSize().background(
