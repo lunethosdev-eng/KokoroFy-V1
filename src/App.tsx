@@ -6,7 +6,9 @@ import { MiniPlayer } from './components/MiniPlayer'
 import { FullPlayer } from './components/FullPlayer'
 import { BottomNav } from './components/BottomNav'
 import { SongCard } from './components/SongCard'
-import { Search, WifiOff } from 'lucide-react'
+import { Search, WifiOff, Settings, Plus } from 'lucide-react'
+import { AccountPanel } from './components/AccountPanel'
+import { createPlaylist } from './lib/supabase'
 
 export default function App() {
   const [tab, setTab] = useState('home')
@@ -16,6 +18,9 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const setQueue = usePlayerStore(s => s.setQueue)
   const setOfflineMode = usePlayerStore(s => s.setOfflineMode)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [playlistOpen, setPlaylistOpen] = useState(false)
+  const [playlistName, setPlaylistName] = useState('')
 
   // Init audio engine (side effects)
   useAudioEngine()
@@ -86,13 +91,14 @@ export default function App() {
       {/* Main content */}
       <main className="flex-1 overflow-y-auto pb-36 pt-safe">
         {/* Header */}
-        <header className="sticky top-0 z-10 px-5 pt-12 pb-4 liquid-glass-purple">
+        <header className="sticky top-0 z-10 px-5 pt-12 pb-4 liquid-header">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="KokoroFy" className="w-9 h-9 rounded-xl" />
-            <div>
+            <div className="flex-1">
               <h1 className="text-xl font-bold tracking-tight">KokoroFy</h1>
               <p className="text-[11px] text-white/50">Liquid Glass Music</p>
             </div>
+            <button onClick={() => setAccountOpen(true)} className="w-10 h-10 rounded-full liquid-glass flex items-center justify-center" aria-label="Cuenta"><Settings size={20}/></button>
           </div>
         </header>
 
@@ -154,7 +160,7 @@ export default function App() {
 
         {tab === 'library' && (
           <div className="px-4 pt-4">
-            <h2 className="text-lg font-semibold mb-3">Tu biblioteca</h2>
+            <div className="flex items-center justify-between mb-3"><h2 className="text-lg font-semibold">Tu biblioteca</h2><button onClick={() => setPlaylistOpen(true)} className="w-9 h-9 rounded-full liquid-glass flex items-center justify-center"><Plus size={18}/></button></div>
             <div className="space-y-0.5">
               {songs.map((s, i) => (
                 <SongCard key={s.id} song={s} queue={songs} index={i} />
@@ -174,6 +180,8 @@ export default function App() {
       <MiniPlayer />
       <FullPlayer />
       <BottomNav active={tab} onChange={setTab} />
+      <AccountPanel open={accountOpen} onClose={() => setAccountOpen(false)} />
+      {playlistOpen && <div className="fixed inset-0 z-[75] bg-black/55 backdrop-blur-md flex items-center justify-center p-4"><div className="liquid-glass-strong rounded-3xl p-5 w-full max-w-sm"><h3 className="text-xl font-bold mb-3">Crear playlist</h3><input autoFocus value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="Nombre de playlist" className="glass-input w-full mb-3"/><div className="flex gap-2"><button onClick={()=>setPlaylistOpen(false)} className="flex-1 py-3 rounded-2xl bg-white/8">Cancelar</button><button onClick={async()=>{try{await createPlaylist(playlistName);setPlaylistName('');setPlaylistOpen(false)}catch{setAccountOpen(true)}}} className="flex-1 py-3 rounded-2xl bg-green-400 text-black font-bold">Crear</button></div></div></div>}
     </div>
   )
 }
