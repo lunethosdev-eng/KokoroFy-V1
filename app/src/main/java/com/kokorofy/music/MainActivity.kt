@@ -22,7 +22,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
@@ -1028,18 +1030,24 @@ private fun MiniPlayer(
             }
         }
         if (FeaturePrefs.get(LocalContext.current, "ui.mini_progress", true)) {
+            val progress = (position.toFloat() / duration.coerceAtLeast(1L)).coerceIn(0f, 1f)
+            val animated = animateFloatAsState(progress, tween(400, easing = FastOutSlowInEasing), label = "mini-progress").value
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(2.dp)
+                    .height(3.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(if (dark) Color.White.copy(.10f) else Color.Black.copy(.10f))
+                    .background(if (dark) Color.White.copy(.10f) else Color.Black.copy(.08f))
             ) {
                 Box(
                     Modifier
-                        .fillMaxWidth((position.toFloat() / duration.coerceAtLeast(1L)).coerceIn(0f, 1f))
+                        .fillMaxWidth(animated)
                         .fillMaxHeight()
-                        .background(SpotifyGreen)
+                        .background(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(SpotifyGreen, Color(0xFF1ED760))
+                            )
+                        )
                 )
             }
         }
@@ -1252,28 +1260,17 @@ private fun FullPlayer(
             AnimatedVisibility(
                 visible = showLyrics,
                 modifier = Modifier.weight(1f),
-                enter = fadeIn(tween(200)),
-                exit = fadeOut(tween(140))
+                enter = fadeIn(tween(280)) + expandVertically(),
+                exit = fadeOut(tween(180)) + shrinkVertically()
             ) {
                 if (parsed.isNotEmpty()) {
-                    LazyColumn(
-                        state = lyricState,
-                        contentPadding = PaddingValues(top = 24.dp, bottom = 32.dp, start = 2.dp, end = 2.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        itemsIndexed(parsed) { index, line ->
-                            val isActive = index == activeLine
-                            val nextTime = parsed.getOrNull(index + 1)?.timeMs ?: (line.timeMs + 2600L)
-                            LyricLineAnimated(
-                                line = line,
-                                position = position,
-                                nextTime = nextTime,
-                                active = isActive,
-                                dark = isDark,
-                                onSeek = onSeek
-                            )
-                        }
-                    }
+                    KaraokeLyricsView(
+                        lines = parsed,
+                        positionMs = position,
+                        dark = isDark,
+                        speedFactor = if (FeaturePrefs.get(LocalContext.current, "extra.lyrics_1_4x", true)) 1.4f else 1.0f,
+                        modifier = Modifier.fillMaxSize().padding(top = 12.dp)
+                    )
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1529,31 +1526,12 @@ private fun SettingsScreen(
                     SettingRow(Icons.Default.Lyrics, "Letras automáticas", "Carga letras al abrir el reproductor") { FeatureSwitch(context, "extra.auto_lyrics", true) }
                 }
             }
-            item {
-                SettingsSection("PRIVACIDAD · 20 CONTROLES") {
-                    FeaturePrefs.privacy.forEach { (key, title, subtitle) ->
-                        SettingRow(Icons.Default.Info, title, subtitle) { FeatureSwitch(context, key) }
-                    }
-                }
-            }
-            item {
-                SettingsSection("PERSONALIZACIÓN · 30 CONTROLES") {
-                    FeaturePrefs.customization.forEach { (key, title, subtitle) ->
-                        SettingRow(Icons.Default.Settings, title, subtitle) { FeatureSwitch(context, key) }
-                    }
-                }
-            }
-            item {
-                SettingsSection("EXPERIMENTAL · 20 CONTROLES") {
-                    FeaturePrefs.experimental.forEach { (key, title, subtitle) ->
-                        SettingRow(Icons.Default.Bolt, title, subtitle) { FeatureSwitch(context, key) }
-                    }
-                }
-            }
-            item {
-                SettingsSection("MÁS FUNCIONES · 60 CONTROLES") {
-                    FeaturePrefs.extra.forEach { (key, title, subtitle) ->
-                        SettingRow(Icons.Default.Cached, title, subtitle) { FeatureSwitch(context, key) }
+            items(FeaturePrefs.categories) { (cat, entries) ->
+                SettingsSection("${cat.uppercase()} · ${entries.size}") {
+                    entries.forEach { (key, title, subtitle) ->
+                        SettingRow(Icons.Default.Settings, title, subtitle) {
+                            FeatureSwitch(context, key)
+                        }
                     }
                 }
             }
@@ -1589,6 +1567,9 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
     var message by remember { mutableStateOf<String?>(null) }
     var loggedIn by remember { mutableStateOf(repo.state().email != null) }
     val scope = rememberCoroutineScope()
+    var displayName by remember { mutableStateOf(ProfilePrefs.displayName(context)) }
+    var username by remember { mutableStateOf(ProfilePrefs.username(context)) }
+    var avatarUri by remember { mutableStateOf(ProfilePrefs.avatarUri(context)) }
 
     Dialog(onDismissRequest = onClose) {
         LiquidGlass(
@@ -1603,6 +1584,57 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
                         fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                     IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Cerrar") }
                 }
+                Spacer(Modifier.height(14.dp))
+                // Profile: photo, name, username
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(SpotifyGreen.copy(alpha = 0.18f))
+                            .clickable {
+                                // Placeholder: user can paste content URI later via settings
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!avatarUri.isNullOrBlank()) {
+                            AsyncImage(
+                                model = avatarUri,
+                                contentDescription = "Avatar",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(Icons.Default.Person, null, tint = SpotifyGreen, modifier = Modifier.size(32.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = displayName,
+                            onValueChange = {
+                                displayName = it
+                                ProfilePrefs.setDisplayName(context, it)
+                            },
+                            label = { Text("Nombre") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = {
+                                username = it.removePrefix("@")
+                                ProfilePrefs.setUsername(context, username)
+                            },
+                            label = { Text("Usuario") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            prefix = { Text("@") }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
                 if (loggedIn) {
                     Text(repo.state().email.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(18.dp))
