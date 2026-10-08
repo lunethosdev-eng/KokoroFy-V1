@@ -14,6 +14,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -1073,8 +1074,8 @@ private fun FullPlayer(
                             .fillMaxWidth()
                             .aspectRatio(1f)
                             .graphicsLayer {
-                                rotationY = if (FeaturePrefs.get(LocalContext.current, "ui.cover_parallax", true)) smoothTiltY * 0.72f else 0f
-                                rotationX = if (FeaturePrefs.get(LocalContext.current, "ui.cover_parallax", true)) -smoothTiltX * 0.58f else 0f
+                                rotationY = if (FeaturePrefs.get(coverParallaxContext, "ui.cover_parallax", true)) smoothTiltY * 0.72f else 0f
+                                rotationX = if (FeaturePrefs.get(coverParallaxContext, "ui.cover_parallax", true)) -smoothTiltX * 0.58f else 0f
                                 cameraDistance = 24f * density
                                 translationX = smoothTiltY * 0.9f
                                 translationY = smoothTiltX * 0.55f
@@ -1248,7 +1249,7 @@ private fun LyricLineAnimated(
     val targetProgress = if (active) (rawProgress * 1.30f).coerceIn(0f, 1f)
     else if (position < line.timeMs) 0f else 1f
 
-    val animatedProgress by androidx.compose.runtime.animateFloatAsState(
+    val animatedProgress by animateFloatAsState(
         targetValue = targetProgress,
         animationSpec = tween(if (active) 65 else 180, easing = FastOutSlowInEasing),
         label = "lyric-progress-1-3x"
