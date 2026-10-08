@@ -9,21 +9,26 @@ import org.json.JSONObject
 import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
 
+/** Result returned by Seki /api/search. */
+data class SekiSearchResponse(
+    val source: String,
+    val count: Int,
+    val results: List<Song>
+)
+
 /**
- * Cliente Seki API.
+ * Client for the Express Seki API deployed on Render.
  *
- * - GET /api/search?q=texto
- * - acepta nombres, artistas y enlaces directos de YouTube
- * - autentica con x-api-key y hace fallback a ?key= si el deployment antiguo
- *   no acepta el header.
- *
- * Todo el trabajo de red corre en Dispatchers.IO.
+ * IMPORTANT: Seki itself performs the YouTube download and, when needed,
+ * stores the resulting audio in Supabase before returning 200.
+ * The APK therefore MUST NOT re-upload Seki's audio_url to Supabase.
  */
 object SekiClient {
     private val http = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(120, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .writeTimeout(180, TimeUnit.SECONDS)
+        .callTimeout(190, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -49,10 +54,12 @@ object SekiClient {
         }.getOrDefault(false)
     }
 
-    suspend fun search(query: String): List<Song> = withContext(Dispatchers.IO) {
+    suspend fun search(query: String): Result<SekiSearchResponse> = withContext(Dispatchers.IO) {
         val q = normalizedQuery(query)
-        if (q.isBlank()) return@withContext emptyList()
-        if (Config.SEKI_API_URL.contains("xxxxx")) return@withContext emptyList()
+        if (q.isBlank()) return@withContext Result.success(SekiSearchResponse("database", 0, emptyList()))
+        if (Config.SEKI_API_URL.contains("xxxxx")) {
+            return@withContext Result.failure(IllegalStateException("Seki URL no configurada"))
+        }
 
         runCatching {
             var response = api.search(
@@ -60,7 +67,7 @@ object SekiClient {
                 apiKey = Config.SEKI_API_KEY.takeIf { it.isNotBlank() }
             )
 
-            // Backward compatibility with Render deployments that only read ?key=.
+            // Compatibility with deployments that authenticate with ?key= instead.
             if (!response.isSuccessful && (response.code() == 401 || response.code() == 403)) {
                 response = api.search(
                     query = q,
@@ -69,49 +76,65 @@ object SekiClient {
             }
 
             if (!response.isSuccessful) {
-                Log.e("Seki", "search HTTP ${response.code()}")
-                return@runCatching emptyList()
+                val body = response.errorBody()?.string().orEmpty()
+                error("Seki HTTP ${response.code()}${if (body.isNotBlank()) ": $body" else ""}")
             }
 
             val body = response.body()?.string().orEmpty()
-            parseResults(body)
+            parseResponse(body)
         }.onFailure {
-            Log.e("Seki", "search failed for ${q.take(80)}", it)
-        }.getOrDefault(emptyList())
+            Log.e("Seki", "search failed for ${q.take(120)}", it)
+        }
     }
 
-    private fun parseResults(body: String): List<Song> {
-        if (body.isBlank()) return emptyList()
+    private fun parseResponse(body: String): SekiSearchResponse {
+        if (body.isBlank()) return SekiSearchResponse("database", 0, emptyList())
 
         val root = runCatching { JSONObject(body) }.getOrNull()
+            ?: error("Seki devolvió JSON inválido")
+
+        val source = root.optString("source", "database")
+        val declaredCount = root.optInt("count", -1)
         val array = when {
-            root?.optJSONArray("results") != null -> root.optJSONArray("results")
-            root?.optJSONArray("songs") != null -> root.optJSONArray("songs")
-            root?.optJSONArray("items") != null -> root.optJSONArray("items")
-            root?.optJSONArray("data") != null -> root.optJSONArray("data")
-            else -> runCatching { JSONArray(body) }.getOrNull()
+            root.optJSONArray("results") != null -> root.optJSONArray("results")
+            root.optJSONArray("songs") != null -> root.optJSONArray("songs")
+            root.optJSONArray("items") != null -> root.optJSONArray("items")
+            root.optJSONArray("data") != null -> root.optJSONArray("data")
+            else -> null
         }
 
-        // Some Seki versions return a single result object for a direct URL.
-        if (array == null && root != null && looksLikeTrack(root)) {
-            return listOf(parseSong(root)).filter { it.audioUrl.isNotBlank() }
+        val out = ArrayList<Song>(array?.length() ?: 0)
+        if (array != null) {
+            for (i in 0 until array.length()) {
+                val value = array.opt(i)
+                if (value !is JSONObject || !looksLikeTrack(value)) continue
+                val song = parseSong(value)
+                if (song.audioUrl.isNotBlank()) out += song
+            }
+        } else {
+            // Be tolerant of older Seki deployments returning one object directly.
+            val nested = listOf("result", "track", "song", "data")
+                .asSequence()
+                .mapNotNull { root.optJSONObject(it) }
+                .firstOrNull { looksLikeTrack(it) }
+            val one = nested ?: root.takeIf { looksLikeTrack(it) }
+            if (one != null) {
+                val song = parseSong(one)
+                if (song.audioUrl.isNotBlank()) out += song
+            }
         }
 
-        if (array == null) return emptyList()
-
-        val out = ArrayList<Song>(array.length())
-        for (i in 0 until array.length()) {
-            val value = array.opt(i)
-            if (value !is JSONObject || !looksLikeTrack(value)) continue
-            val song = parseSong(value)
-            if (song.audioUrl.isNotBlank()) out += song
-        }
-        return out
+        return SekiSearchResponse(
+            source = source,
+            count = if (declaredCount >= 0) declaredCount else out.size,
+            results = out
+        )
     }
 
     private fun looksLikeTrack(o: JSONObject): Boolean =
         o.has("audio_url") || o.has("audioUrl") || o.has("stream_url") ||
-            o.has("url") || o.has("youtube_id") || o.has("videoId")
+            o.has("streamUrl") || o.has("download_url") || o.has("youtube_id") ||
+            o.has("youtubeId") || o.has("videoId")
 
     private fun parseSong(o: JSONObject): Song {
         val audio = firstNonBlank(
@@ -119,6 +142,8 @@ object SekiClient {
             o.optString("audioUrl"),
             o.optString("stream_url"),
             o.optString("streamUrl"),
+            o.optString("download_url"),
+            o.optString("audio"),
             o.optString("url")
         )
 
@@ -131,9 +156,9 @@ object SekiClient {
         )
 
         val duration = when {
-            o.optLong("duration") > 0L -> o.optLong("duration")
             o.optLong("duration_seconds") > 0L -> o.optLong("duration_seconds")
             o.optLong("durationSeconds") > 0L -> o.optLong("durationSeconds")
+            o.optLong("duration") > 0L -> o.optLong("duration")
             else -> 0L
         }
 
