@@ -1,5 +1,6 @@
 import { Home, Search, Library, Radio } from 'lucide-react'
 import { motion } from 'framer-motion'
+import { LiquidGlass } from './LiquidGlass'
 
 interface BottomNavProps { active: string; onChange: (tab: string) => void }
 const tabs = [
@@ -12,7 +13,7 @@ const tabs = [
 export function BottomNav({ active, onChange }: BottomNavProps) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-30 safe-bottom pointer-events-none px-3">
-      <div className="liquid-nav pointer-events-auto mx-auto max-w-xl mb-3 rounded-[24px] flex items-center justify-around py-2 px-1">
+      <LiquidGlass className="liquid-nav pointer-events-auto mx-auto max-w-xl mb-3 rounded-[24px] flex items-center justify-around py-2 px-1">
         {tabs.map(({ id, label, icon: Icon }) => {
           const isActive = active === id
           return (
@@ -23,7 +24,7 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
             </button>
           )
         })}
-      </div>
+      </LiquidGlass>
     </nav>
   )
 }
