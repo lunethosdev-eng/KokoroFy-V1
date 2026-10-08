@@ -1,4 +1,4 @@
-{
+
   "name": "kokorofy-music",
   "private": true,
   "version": "1.0.0",
@@ -22,7 +22,8 @@
     "lucide-react": "^0.424.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zustand": "^4.5.4"
+    "zustand": "^4.5.4",
+    "html2canvas": "^1.4.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.1.0",
@@ -36,4 +37,3 @@
     "vite": "^5.4.0",
     "vite-plugin-pwa": "^0.20.1"
   }
-}
