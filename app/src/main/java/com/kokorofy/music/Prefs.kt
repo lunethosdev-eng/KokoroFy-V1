@@ -91,7 +91,7 @@ object Prefs {
     fun setSortMode(c: Context, v: Int) = sp(c).edit().putInt("sort", v).apply()
 
     /** 0 = light, 1 = dark */
-    fun themeMode(c: Context) = sp(c).getInt("theme", 1)
+    fun themeMode(c: Context) = sp(c).getInt("theme", 0)
     fun setThemeMode(c: Context, v: Int) = sp(c).edit().putInt("theme", v).apply()
 
     fun isDark(c: Context) = themeMode(c) == 1
