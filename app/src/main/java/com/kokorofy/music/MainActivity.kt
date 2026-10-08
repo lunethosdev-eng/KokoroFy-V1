@@ -961,6 +961,7 @@ private fun FullPlayer(
     onFavorite: () -> Unit,
     onSeek: (Long) -> Unit
 ) {
+    val fullPlayerContext = LocalContext.current
     val parsed = remember(lyrics) { parseLyrics(lyrics) }
     val activeLine = remember(parsed, position) {
         parsed.indexOfLast { it.timeMs <= position }.coerceAtLeast(0)
@@ -1074,8 +1075,8 @@ private fun FullPlayer(
                             .fillMaxWidth()
                             .aspectRatio(1f)
                             .graphicsLayer {
-                                rotationY = if (FeaturePrefs.get(coverParallaxContext, "ui.cover_parallax", true)) smoothTiltY * 0.72f else 0f
-                                rotationX = if (FeaturePrefs.get(coverParallaxContext, "ui.cover_parallax", true)) -smoothTiltX * 0.58f else 0f
+                                rotationY = if (FeaturePrefs.get(fullPlayerContext, "ui.cover_parallax", true)) smoothTiltY * 0.72f else 0f
+                                rotationX = if (FeaturePrefs.get(fullPlayerContext, "ui.cover_parallax", true)) -smoothTiltX * 0.58f else 0f
                                 cameraDistance = 24f * density
                                 translationX = smoothTiltY * 0.9f
                                 translationY = smoothTiltX * 0.55f
