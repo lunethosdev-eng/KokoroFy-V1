@@ -54,10 +54,11 @@ export function AccountPanel({ open, onClose }: { open: boolean; onClose: () => 
     <AnimatePresence>
       {open && (
         <motion.div className="fixed inset-0 z-[80] bg-black/55 backdrop-blur-md flex items-end sm:items-center justify-center p-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <motion.div initial={{ y: 60, scale: .96 }} animate={{ y: 0, scale: 1 }} exit={{ y: 40, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 30 }} className="w-full max-w-md max-h-[88vh] overflow-y-auto liquid-glass-strong rounded-[28px] p-5">
+          <motion.div initial={{ y: 60, scale: .96 }} animate={{ y: 0, scale: 1 }} exit={{ y: 40, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 30 }} className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-[28px]">
+            <LiquidGlass className="p-5">
             <div className="flex items-center justify-between mb-5">
               <div><p className="text-xs uppercase tracking-[.18em] text-white/45">Cuenta KokoroFy</p><h2 className="text-2xl font-bold mt-1">{session ? 'Tu cuenta' : mode === 'login' ? 'Entrar' : 'Crear cuenta'}</h2></div>
-              <button onClick={onClose} className="w-10 h-10 rounded-full liquid-glass flex items-center justify-center"><X size={19}/></button>
+              <LiquidGlass className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer" onClick={onClose}><X size={19}/></LiquidGlass>
             </div>
             {!session ? (
               <div className="space-y-3">
@@ -75,6 +76,7 @@ export function AccountPanel({ open, onClose }: { open: boolean; onClose: () => 
               </div>
             )}
             {message && <p className="text-xs text-white/55 mt-3 leading-relaxed">{message}</p>}
+            </LiquidGlass>
           </motion.div>
         </motion.div>
       )}
