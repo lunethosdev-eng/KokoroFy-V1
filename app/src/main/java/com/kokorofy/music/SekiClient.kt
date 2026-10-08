@@ -62,22 +62,38 @@ object SekiClient {
         }
 
         runCatching {
+            // Always send BOTH header and query key (some deployments only check one).
+            val key = Config.SEKI_API_KEY.trim().takeIf { it.isNotBlank() }
+            if (key == null) {
+                error("SEKI_API_KEY vacía en Config.kt")
+            }
+
             var response = api.search(
                 query = q,
-                apiKey = Config.SEKI_API_KEY.takeIf { it.isNotBlank() }
+                apiKey = key,
+                queryKey = key
             )
 
-            // Compatibility with deployments that authenticate with ?key= instead.
+            // Retry once with only query key if header path is rejected.
             if (!response.isSuccessful && (response.code() == 401 || response.code() == 403)) {
+                Log.w("Seki", "auth rejected with header, retrying ?key=")
                 response = api.search(
                     query = q,
-                    queryKey = Config.SEKI_API_KEY.takeIf { it.isNotBlank() }
+                    apiKey = null,
+                    queryKey = key
                 )
             }
 
             if (!response.isSuccessful) {
                 val body = response.errorBody()?.string().orEmpty()
-                error("Seki HTTP ${response.code()}${if (body.isNotBlank()) ": $body" else ""}")
+                val code = response.code()
+                val hint = when (code) {
+                    401, 403 -> " (API key rechazada: revisa SEKI_API_KEY en Config.kt y API_SECRET en Render)"
+                    500 -> " (el servidor falló al procesar; la key SÍ se envió. Revisa logs de Render / yt-dlp)"
+                    502, 503, 504 -> " (Render frío o caído; reintenta en unos segundos)"
+                    else -> ""
+                }
+                error("Seki HTTP $code$hint${if (body.isNotBlank()) ": $body" else ""}")
             }
 
             val body = response.body()?.string().orEmpty()
