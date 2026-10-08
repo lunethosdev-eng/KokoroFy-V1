@@ -8,6 +8,7 @@ import { BottomNav } from './components/BottomNav'
 import { SongCard } from './components/SongCard'
 import { Search, WifiOff, Settings, Plus } from 'lucide-react'
 import { AccountPanel } from './components/AccountPanel'
+import { LiquidGlass } from './components/LiquidGlass'
 import { createPlaylist } from './lib/supabase'
 
 export default function App() {
@@ -59,27 +60,6 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col relative overflow-hidden">
-      {/* SVG filter for liquid refraction (Chrome) */}
-      <svg width="0" height="0" className="absolute">
-        <defs>
-          <filter id="liquid-lens">
-            <feTurbulence
-              type="fractalNoise"
-              baseFrequency="0.012"
-              numOctaves="2"
-              result="noise"
-            />
-            <feDisplacementMap
-              in="SourceGraphic"
-              in2="noise"
-              scale="8"
-              xChannelSelector="R"
-              yChannelSelector="G"
-            />
-          </filter>
-        </defs>
-      </svg>
-
       {/* Offline banner */}
       {!isOnline && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500/90 text-black text-center text-xs py-1.5 safe-top flex items-center justify-center gap-1.5">
@@ -98,7 +78,7 @@ export default function App() {
               <h1 className="text-xl font-bold tracking-tight">KokoroFy</h1>
               <p className="text-[11px] text-white/50">Liquid Glass Music</p>
             </div>
-            <button onClick={() => setAccountOpen(true)} className="w-10 h-10 rounded-full liquid-glass flex items-center justify-center" aria-label="Cuenta"><Settings size={20}/></button>
+            <LiquidGlass className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer" onClick={() => setAccountOpen(true)}><Settings size={20}/></LiquidGlass>
           </div>
         </header>
 
@@ -160,7 +140,7 @@ export default function App() {
 
         {tab === 'library' && (
           <div className="px-4 pt-4">
-            <div className="flex items-center justify-between mb-3"><h2 className="text-lg font-semibold">Tu biblioteca</h2><button onClick={() => setPlaylistOpen(true)} className="w-9 h-9 rounded-full liquid-glass flex items-center justify-center"><Plus size={18}/></button></div>
+            <div className="flex items-center justify-between mb-3"><h2 className="text-lg font-semibold">Tu biblioteca</h2><LiquidGlass className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer" onClick={() => setPlaylistOpen(true)}><Plus size={18}/></LiquidGlass></div>
             <div className="space-y-0.5">
               {songs.map((s, i) => (
                 <SongCard key={s.id} song={s} queue={songs} index={i} />
@@ -181,7 +161,7 @@ export default function App() {
       <FullPlayer />
       <BottomNav active={tab} onChange={setTab} />
       <AccountPanel open={accountOpen} onClose={() => setAccountOpen(false)} />
-      {playlistOpen && <div className="fixed inset-0 z-[75] bg-black/55 backdrop-blur-md flex items-center justify-center p-4"><div className="liquid-glass-strong rounded-3xl p-5 w-full max-w-sm"><h3 className="text-xl font-bold mb-3">Crear playlist</h3><input autoFocus value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="Nombre de playlist" className="glass-input w-full mb-3"/><div className="flex gap-2"><button onClick={()=>setPlaylistOpen(false)} className="flex-1 py-3 rounded-2xl bg-white/8">Cancelar</button><button onClick={async()=>{try{await createPlaylist(playlistName);setPlaylistName('');setPlaylistOpen(false)}catch{setAccountOpen(true)}}} className="flex-1 py-3 rounded-2xl bg-green-400 text-black font-bold">Crear</button></div></div></div>}
+      {playlistOpen && <div className="fixed inset-0 z-[75] bg-black/55 backdrop-blur-md flex items-center justify-center p-4"><LiquidGlass className="rounded-3xl p-5 w-full max-w-sm"><h3 className="text-xl font-bold mb-3">Crear playlist</h3><input autoFocus value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="Nombre de playlist" className="glass-input w-full mb-3"/><div className="flex gap-2"><button onClick={()=>setPlaylistOpen(false)} className="flex-1 py-3 rounded-2xl bg-white/8">Cancelar</button><button onClick={async()=>{try{await createPlaylist(playlistName);setPlaylistName('');setPlaylistOpen(false)}catch{setAccountOpen(true)}}} className="flex-1 py-3 rounded-2xl bg-green-400 text-black font-bold">Crear</button></div></LiquidGlass></div>}
     </div>
   )
 }
