@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Download, Share2, MoreHorizontal, Mic2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { LiquidGlass } from './LiquidGlass'
 import { usePlayerStore } from '../hooks/usePlayerStore'
 import { useAudioEngine } from '../hooks/useAudioEngine'
 import { Equalizer } from './Equalizer'
@@ -32,9 +33,9 @@ export function FullPlayer() {
     {isFullPlayerOpen && <motion.div initial={{y:'100%',opacity:.8}} animate={{y:0,opacity:1}} exit={{y:'100%',opacity:0}} transition={{type:'spring',damping:30,stiffness:340,mass:.8}} className="fixed inset-0 z-50 flex flex-col player-bg safe-top safe-bottom overflow-hidden">
       <div className="player-orb player-orb-a"/><div className="player-orb player-orb-b"/>
       <div className="relative z-10 flex items-center justify-between px-5 pt-3 pb-2">
-        <button onClick={closeFullPlayer} className="w-11 h-11 rounded-full liquid-glass flex items-center justify-center pressable"><ChevronDown size={22}/></button>
+        <LiquidGlass className="w-11 h-11 rounded-full flex items-center justify-center pressable cursor-pointer" onClick={closeFullPlayer}><ChevronDown size={22}/></LiquidGlass>
         <div className="text-center min-w-0"><p className="text-[10px] uppercase tracking-[.22em] text-white/45">Reproduciendo desde</p><p className="text-sm font-semibold truncate max-w-[210px]">{currentSong.album||'KokoroFy'}</p></div>
-        <button className="w-11 h-11 rounded-full liquid-glass flex items-center justify-center pressable"><MoreHorizontal size={20}/></button>
+        <LiquidGlass className="w-11 h-11 rounded-full flex items-center justify-center pressable cursor-pointer"><MoreHorizontal size={20}/></LiquidGlass>
       </div>
 
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-7 gap-5 min-h-0">
