@@ -264,6 +264,9 @@ fun KokoroFyApp(
     var query by remember { mutableStateOf("") }
     var remoteSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
     var searchingRemote by remember { mutableStateOf(false) }
+    var cloudImporting by remember { mutableStateOf(false) }
+    var cloudImportMessage by remember { mutableStateOf<String?>(null) }
+    var searchError by remember { mutableStateOf<String?>(null) }
     val downloadProgress by OfflineManager.progress.collectAsState(initial = OfflineManager.Progress())
     var tab by remember { mutableIntStateOf(0) }
     var lyrics by remember { mutableStateOf<String?>(null) }
@@ -291,11 +294,13 @@ fun KokoroFyApp(
         runCatching { repo.refresh() }
     }
 
-    // Búsqueda remota con Seki: si no hay resultados locales, busca y descarga on-demand
+    // Búsqueda remota con Seki. Los enlaces de YouTube se importan a Supabase
+    // y después se guardan también offline; las búsquedas normales permanecen locales.
     LaunchedEffect(query) {
         if (query.length < 2) {
             remoteSongs = emptyList()
             searchingRemote = false
+            cloudImportMessage = null
             return@LaunchedEffect
         }
         if (FeaturePrefs.get(context, "privacy.local_only") || FeaturePrefs.get(context, "privacy.redact_search")) {
@@ -303,26 +308,42 @@ fun KokoroFyApp(
             searchingRemote = false
             return@LaunchedEffect
         }
-        delay(450) // debounce
+        delay(350)
         searchingRemote = true
+        cloudImporting = false
+        cloudImportMessage = null
+        searchError = null
 
-        // Seki recibe el texto completo. Si el usuario pega un enlace de YouTube,
-        // no lo recortamos: el backend puede resolverlo directamente.
         val q = query.trim()
-        val results = runCatching { SekiClient.search(q) }.getOrDefault(emptyList())
-
-        remoteSongs = results
+        val outcome = SekiClient.search(q)
         searchingRemote = false
 
-        // Guarda los resultados en Room para que aparezcan en la biblioteca
-        // después de la búsqueda. La reproducción usa el audio_url devuelto por Seki.
-        if (results.isNotEmpty()) {
-            runCatching { repo.upsertAll(results) }
-            if (FeaturePrefs.get(context, "extra.auto_download", true) &&
-                results.size == 1 &&
-                q.startsWith("http", ignoreCase = true)
-            ) {
-                OfflineManager.download(context, results.first())
+        outcome.onSuccess { response ->
+            // Seki is the source of truth. If source=downloaded_on_demand,
+            // the Render backend has already downloaded the YouTube audio,
+            // uploaded it to Supabase Storage and returned the public audio_url.
+            // Do NOT download and re-upload that file from the APK.
+            remoteSongs = response.results
+            if (response.results.isNotEmpty()) {
+                repo.upsertAll(response.results)
+                cloudImportMessage = when (response.source) {
+                    "downloaded_on_demand" -> "Seki procesó el audio y lo guardó en Supabase"
+                    else -> "Resultados de Seki · ${response.count} canción${if (response.count == 1) "" else "es"}"
+                }
+
+                // Optional local/offline copy. This is separate from Supabase persistence.
+                if (q.isNotBlank() && FeaturePrefs.get(context, "extra.auto_download", false)) {
+                    response.results.take(1).forEach { OfflineManager.download(context, it) }
+                }
+            }
+        }.onFailure { error ->
+            remoteSongs = emptyList()
+            searchError = when {
+                error.message?.contains("401") == true || error.message?.contains("403") == true ->
+                    "Seki rechazó la API key. Revisa SEKI_API_KEY en Config.kt."
+                error.message?.contains("timeout", ignoreCase = true) == true ->
+                    "Seki tardó demasiado. Render puede estar despertando o procesando el audio."
+                else -> "No se pudo conectar con Seki: ${error.message ?: "error de red"}"
             }
         }
     }
@@ -347,11 +368,12 @@ fun KokoroFyApp(
         current = song
         showPlayer = true
         showLyrics = false
+        lyrics = null
         controller?.apply {
             setMediaItem(
                 MediaItem.Builder()
                     .setMediaId(song.id)
-                    .setUri(song.audioUrl)
+                    .setUri(OfflineManager.playUri(context, song))
                     .setMediaMetadata(
                         androidx.media3.common.MediaMetadata.Builder()
                             .setTitle(song.title)
@@ -370,11 +392,21 @@ fun KokoroFyApp(
         }
         if (Prefs.autoLoadLyrics(context) || FeaturePrefs.get(context, "extra.auto_lyrics", true)) {
             scope.launch {
-                lyrics = LyricsRepository().fetch(song)?.let { it.synced ?: it.plain }
+                val result = LyricsRepository().fetch(song)
+                lyrics = result?.synced ?: result?.plain
             }
         }
     }
 
+
+    fun saveAndDownload(song: Song) {
+        // Seki already persists server-side. This action only saves the returned
+        // metadata locally and downloads an offline copy to the device.
+        scope.launch {
+            repo.upsertAll(listOf(song))
+            OfflineManager.download(context, song)
+        }
+    }
 
     fun shareSong(song: Song) {
         if (FeaturePrefs.get(context, "privacy.external_share")) return
@@ -394,7 +426,8 @@ fun KokoroFyApp(
     fun loadLyrics() {
         val song = current ?: return
         scope.launch {
-            lyrics = LyricsRepository().fetch(song)?.let { it.synced ?: it.plain }
+            val result = LyricsRepository().fetch(song)
+            lyrics = result?.synced ?: result?.plain
             showLyrics = true
         }
     }
@@ -520,7 +553,7 @@ fun KokoroFyApp(
                     dark = dark,
                     showEq = showEq,
                     onPlay = ::play,
-                    onDownload = { OfflineManager.download(context, it) }
+                    onDownload = { saveAndDownload(it) }
                 )
                 1 -> SearchScreen(
                     songs = (songs.filter {
@@ -529,15 +562,18 @@ fun KokoroFyApp(
                     query = query,
                     dark = dark,
                     searching = searchingRemote,
+                    cloudImporting = cloudImporting,
+                    cloudImportMessage = cloudImportMessage,
+                    searchError = searchError,
                     onQuery = { query = it },
                     onPlay = ::play,
-                    onDownload = { OfflineManager.download(context, it) }
+                    onDownload = { saveAndDownload(it) }
                 )
                 else -> LibraryScreen(
                     songs = songs,
                     dark = dark,
                     onPlay = ::play,
-                    onDownload = { OfflineManager.download(context, it) }
+                    onDownload = { saveAndDownload(it) }
                 )
             }
         }
@@ -578,7 +614,7 @@ fun KokoroFyApp(
                     controller?.repeatMode = if (repeat) 1 else 0
                 },
                 onLyrics = { if (lyrics == null) loadLyrics() else showLyrics = !showLyrics },
-                onDownload = { OfflineManager.download(context, song) },
+                onDownload = { saveAndDownload(song) },
                 onShare = { shareSong(song) },
                 onFavorite = { TasteManager.toggleFavorite(context, song.id) },
                 onSeek = { controller?.seekTo(it) }
@@ -636,41 +672,89 @@ private fun HomeScreen(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 34.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         item {
-            Text("Buenas noches", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                "Tu música,\nexactamente como quieres.",
-                fontSize = 32.sp,
-                lineHeight = 35.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = (-1.2).sp
-            )
+            Column {
+                Text(
+                    "Buenas noches",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "Tu música,
+exactamente como quieres.",
+                    fontSize = 31.sp,
+                    lineHeight = 34.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-1.1).sp
+                )
+            }
         }
-        if (showEq) item { EqualizerCard(dark) }
+
         if (songs.isNotEmpty()) {
             item {
-                Text("Escuchado recientemente", fontWeight = FontWeight.Bold, fontSize = 19.sp)
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    songs.take(6).forEach { song ->
-                        AlbumCard(song, dark, onPlay)
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Escuchado recientemente", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                        Text("Ver todo", fontSize = 12.sp, color = SpotifyGreen, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        songs.take(8).forEach { AlbumCard(it, dark, onPlay) }
                     }
                 }
             }
+
             item {
-                Text("Para ti", fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                Column {
+                    Text("Para ti", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        QuickHomeAction(Icons.Default.Favorite, "Favoritos", SpotifyGreen)
+                        QuickHomeAction(Icons.Default.Download, "Descargas", MaterialTheme.colorScheme.onSurface)
+                        QuickHomeAction(Icons.Default.QueueMusic, "Tu cola", MaterialTheme.colorScheme.onSurface)
+                    }
+                }
             }
-            items(songs.take(12), key = { it.id }) { song ->
+
+            item { Text("Tus canciones", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold) }
+            items(songs.take(15), key = { it.id }) { song ->
                 TrackRow(song, dark, onPlay, onDownload)
             }
         } else {
-            item { EmptyState("Tu catálogo está esperando música.") }
+            item { EmptyState("Tu biblioteca está lista. Busca una canción o pega un enlace de YouTube.") }
+        }
+
+        if (showEq) item { EqualizerCard(dark) }
+    }
+}
+
+@Composable
+private fun RowScope.QuickHomeAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .72f),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.height(52.dp).weight(1f)
+    ) {
+        Row(
+            Modifier.fillMaxSize().padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(19.dp))
+            Spacer(Modifier.width(7.dp))
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         }
     }
 }
@@ -698,22 +782,28 @@ private fun SearchScreen(
     query: String,
     dark: Boolean,
     searching: Boolean = false,
+    cloudImporting: Boolean = false,
+    cloudImportMessage: String? = null,
+    searchError: String? = null,
     onQuery: (String) -> Unit,
     onPlay: (Song) -> Unit,
     onDownload: (Song) -> Unit
 ) {
     Column(Modifier.fillMaxSize()) {
+        Spacer(Modifier.height(8.dp))
+        Text("Buscar", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.8).sp)
+        Text("Canciones, artistas o enlaces de YouTube", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(14.dp))
+
         LiquidGlass(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp, bottom = 14.dp),
+            modifier = Modifier.fillMaxWidth(),
             dark = dark,
-            corner = RoundedCornerShape(20.dp),
+            corner = RoundedCornerShape(18.dp),
             interactive = true,
-            intensity = 0.95f
+            intensity = 0.55f
         ) {
             Row(
-                Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 14.dp),
+                Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -728,50 +818,58 @@ private fun SearchScreen(
                         fontSize = 16.sp
                     ),
                     decorationBox = { inner ->
-                        if (query.isBlank()) {
-                            Text(
-                                "Canciones, artistas o pega un link de YouTube",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .72f),
-                                fontSize = 15.sp
-                            )
-                        }
+                        if (query.isBlank()) Text("¿Qué quieres escuchar?", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
                         inner()
                     }
                 )
-                if (query.isNotBlank()) {
-                    IconButton(onClick = { onQuery("") }) {
-                        Icon(Icons.Default.Close, "Borrar búsqueda")
-                    }
-                }
+                if (query.isNotBlank()) IconButton(onClick = { onQuery("") }) { Icon(Icons.Default.Close, "Borrar") }
             }
         }
-        if (searching) {
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 20.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.size(22.dp),
-                    color = SpotifyGreen,
-                    strokeWidth = 2.5.dp
+
+        Spacer(Modifier.height(12.dp))
+        if (query.isBlank()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SearchHint("Artistas")
+                SearchHint("Álbumes")
+                SearchHint("YouTube")
+            }
+        }
+
+        if (searching || cloudImporting) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(20.dp), color = SpotifyGreen, strokeWidth = 2.5.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    if (cloudImporting) "Procesando audio en la nube…" else "Buscando en Seki… puede tardar hasta 3 minutos si Render está despertando o descargando el audio.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.width(12.dp))
-                Text("Buscando en Seki…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
             }
+        } else if (searchError != null) {
+            Text(searchError, fontSize = 12.sp, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 8.dp))
+        } else if (cloudImportMessage != null) {
+            Text(cloudImportMessage, fontSize = 12.sp, color = SpotifyGreen, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 8.dp))
         }
+
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+            contentPadding = PaddingValues(bottom = 28.dp)
         ) {
+            if (query.isNotBlank() && songs.isNotEmpty()) {
+                item { Text("Resultados", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) }
+            }
             items(songs, key = { it.id }) { TrackRow(it, dark, onPlay, onDownload) }
-            if (songs.isEmpty() && !searching && query.length >= 2) {
-                item { EmptyState("No encontramos nada. Prueba un nombre más corto o un link.") }
-            }
-            if (songs.isEmpty() && query.isBlank()) {
-                item { EmptyState("Busca una canción, artista o pega un link de YouTube.") }
-            }
+            if (songs.isEmpty() && !searching && !cloudImporting && searchError == null && query.length >= 2) item { EmptyState("No encontramos resultados. Prueba otro nombre o pega el enlace completo de YouTube.") }
+            if (songs.isEmpty() && query.isBlank()) item { EmptyState("Busca una canción, un artista o pega un enlace de YouTube.") }
         }
+    }
+}
+
+@Composable
+private fun SearchHint(text: String) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .75f), shape = RoundedCornerShape(999.dp)) {
+        Text(text, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -783,17 +881,28 @@ private fun LibraryScreen(
     onDownload: (Song) -> Unit
 ) {
     LazyColumn(
-        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        item {
+            Text("Biblioteca", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.8).sp)
+            Text("Todo lo que guardas en KokoroFy", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 LibraryPill(Icons.Default.Download, "Descargas")
                 LibraryPill(Icons.Default.FavoriteBorder, "Favoritos")
             }
         }
-        item { Text("Canciones", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold) }
-        items(songs, key = { it.id }) { TrackRow(it, dark, onPlay, onDownload) }
+        item {
+            Text("Canciones", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+        }
+        if (songs.isEmpty()) {
+            item { EmptyState("Todavía no tienes canciones guardadas.") }
+        } else {
+            items(songs, key = { it.id }) { TrackRow(it, dark, onPlay, onDownload) }
+        }
     }
 }
 
@@ -836,7 +945,7 @@ private fun TrackRow(
         )
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(song.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 "${song.artist} • ${song.album}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -893,12 +1002,12 @@ private fun MiniPlayer(
                     fontSize = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = if (dark) Color.White else Color.Black
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     song.artist,
                     fontSize = 12.sp,
-                    color = if (dark) Color.White.copy(alpha = 0.68f) else Color.Black.copy(alpha = 0.60f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -907,14 +1016,14 @@ private fun MiniPlayer(
                 Icon(
                     if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = null,
-                    tint = if (dark) Color.White else Color.Black
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
             IconButton(onClick = onNext) {
                 Icon(
                     Icons.Default.SkipNext,
                     contentDescription = null,
-                    tint = if (dark) Color.White else Color.Black
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
@@ -1331,21 +1440,41 @@ private fun lyricEmotion(text: String): String = lyricWordEmotion(text)
 
 private fun parseLyrics(raw: String?): List<LyricLine> {
     if (raw.isNullOrBlank()) return emptyList()
+
     val result = mutableListOf<LyricLine>()
-    raw.lines().forEach { line ->
-        val matches = Regex("""\\[(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?\\]""").findAll(line).toList()
-        val text = line.replace(Regex("""\\[\\d{1,3}:\\d{2}(?:[.:]\\d{1,3})?\\]"""), "").trim()
-        matches.forEach { m ->
-            val minutes = m.groupValues[1].toLong()
-            val seconds = m.groupValues[2].toLong()
-            val fraction = m.groupValues.getOrNull(3)?.toLongOrNull() ?: 0L
-            val millis = if (fraction < 100) fraction * 10 else fraction
-            result += LyricLine(minutes * 60_000 + seconds * 1_000 + millis, text)
+    val tagRegex = Regex("""\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]""")
+
+    raw.replace("\r", "").lines().forEach { line ->
+        val matches = tagRegex.findAll(line).toList()
+        if (matches.isEmpty()) return@forEach
+
+        val lyricText = line.replace(tagRegex, "").trim()
+        if (lyricText.isBlank()) return@forEach
+
+        matches.forEach { match ->
+            val minutes = match.groupValues[1].toLongOrNull() ?: return@forEach
+            val seconds = match.groupValues[2].toLongOrNull() ?: return@forEach
+            val fractionRaw = match.groupValues.getOrNull(3).orEmpty()
+            val millis = when (fractionRaw.length) {
+                0 -> 0L
+                1 -> fractionRaw.toLongOrNull()?.times(100) ?: 0L
+                2 -> fractionRaw.toLongOrNull()?.times(10) ?: 0L
+                else -> fractionRaw.take(3).toLongOrNull() ?: 0L
+            }
+            result += LyricLine(minutes * 60_000L + seconds * 1_000L + millis, lyricText)
         }
     }
-    return if (result.isEmpty()) raw.lines().filter { it.isNotBlank() }.mapIndexed { i, t -> LyricLine(i * 4000L, t) }
-    else result.sortedBy { it.timeMs }
+
+    if (result.isNotEmpty()) return result.sortedBy { it.timeMs }
+
+    // Plain lyrics: keep them visible even when there are no timestamps.
+    return raw.replace("\r", "")
+        .lines()
+        .map { it.trim() }
+        .filter { it.isNotBlank() && !it.startsWith("[ar:") && !it.startsWith("[ti:") }
+        .mapIndexed { index, text -> LyricLine(index * 4_000L, text) }
 }
+
 
 @Composable
 private fun SettingsScreen(
@@ -1357,6 +1486,8 @@ private fun SettingsScreen(
     onEqChange: (Boolean) -> Unit,
     onAccount: () -> Unit
 ) {
+    val auth = remember { AuthRepository(context) }
+    val authState = remember { auth.state() }
     Column(
         Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
@@ -1364,92 +1495,72 @@ private fun SettingsScreen(
             .navigationBarsPadding()
     ) {
         TopAppBar(
-            title = { Text("Ajustes", fontWeight = FontWeight.ExtraBold) },
+            title = { Text("Ajustes", fontWeight = FontWeight.ExtraBold, fontSize = 25.sp) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Atrás") } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
         )
         LazyColumn(
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             item {
-                SettingsSection("Cuenta") {
-                    val auth = remember { AuthRepository(context) }
-                    val state = remember { auth.state() }
-                    SettingRow(Icons.Default.Person, "Cuenta KokoroFy",
-                        state.email ?: "Regístrate para conservar tu sesión") {
-                        OutlinedButton(onClick = onAccount) { Text(if (state.email == null) "Entrar" else "Cuenta") }
+                SettingsSection("CUENTA") {
+                    SettingRow(Icons.Default.Person, "Cuenta KokoroFy", authState.email ?: "Inicia sesión para sincronizar tu música") {
+                        OutlinedButton(onClick = onAccount, shape = RoundedCornerShape(999.dp)) { Text(if (authState.email == null) "Entrar" else "Cuenta") }
                     }
                 }
             }
             item {
-                SettingsSection("Apariencia") {
-                    SettingRow(Icons.Default.DarkMode, "Modo oscuro", "Interfaz nocturna de alto contraste") {
-                        Switch(checked = dark, onCheckedChange = onDarkChange)
-                    }
-                    SettingRow(Icons.Default.NightsStay, "Liquid Glass", "Cristal translúcido con specular y deformación") {
-                        FeatureSwitch(context, "ui.glass", true)
-                    }
-                    SettingRow(Icons.Default.Bolt, "Giroscopio 3D", "Inclina la portada del full player con el teléfono") {
-                        FeatureSwitch(context, "ui.gyro_3d", true)
-                    }
-                    SettingRow(Icons.Default.Lyrics, "Karaoke por carácter", "Colorea letra por letra durante la reproducción") {
-                        FeatureSwitch(context, "ui.lyrics_karaoke", true)
-                    }
-                    SettingRow(Icons.Default.Equalizer, "Ecualizador", "Visualizador animado") {
-                        Switch(checked = showEq, onCheckedChange = onEqChange)
-                    }
+                SettingsSection("APARIENCIA") {
+                    SettingRow(Icons.Default.DarkMode, "Modo oscuro", "Interfaz nocturna de alto contraste") { Switch(checked = dark, onCheckedChange = onDarkChange) }
+                    SettingRow(Icons.Default.NightsStay, "Liquid Glass", "Cristal translúcido con refracción y borde especular") { FeatureSwitch(context, "ui.glass", true) }
+                    SettingRow(Icons.Default.Bolt, "Giroscopio 3D", "Inclina la portada con el movimiento del teléfono") { FeatureSwitch(context, "ui.gyro_3d", true) }
+                    SettingRow(Icons.Default.Lyrics, "Karaoke por carácter", "Ilumina la letra mientras avanza la canción") { FeatureSwitch(context, "ui.lyrics_karaoke", true) }
+                    SettingRow(Icons.Default.Equalizer, "Ecualizador", "Visualizador animado del reproductor") { Switch(checked = showEq, onCheckedChange = onEqChange) }
                 }
             }
             item {
-                SettingsSection("Privacidad · 20 controles") {
-                    FeaturePrefs.privacy.forEach { (key, title, subtitle) ->
-                        SettingRow(Icons.Default.Info, title, subtitle) {
-                            FeatureSwitch(context, key)
-                        }
-                    }
-                }
-            }
-            item {
-                SettingsSection("Personalización · 30 controles") {
-                    FeaturePrefs.customization.forEach { (key, title, subtitle) ->
-                        SettingRow(Icons.Default.Settings, title, subtitle) {
-                            FeatureSwitch(context, key)
-                        }
-                    }
-                }
-            }
-            item {
-                SettingsSection("Experimental · 20 controles") {
-                    FeaturePrefs.experimental.forEach { (key, title, subtitle) ->
-                        SettingRow(Icons.Default.Bolt, title, subtitle) {
-                            FeatureSwitch(context, key)
-                        }
-                    }
-                }
-            }
-            item {
-                SettingsSection("Más funciones · 60 controles") {
-                    FeaturePrefs.extra.forEach { (key, title, subtitle) ->
-                        SettingRow(Icons.Default.Cached, title, subtitle) {
-                            FeatureSwitch(context, key)
-                        }
-                    }
-                }
-            }
-            item {
-                SettingsSection("Reproducción") {
-                    SettingRow(Icons.Default.Speed, "Velocidad", "Velocidad de reproducción persistente") {
-                        Text("${Prefs.speed(context)}x", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                    }
+                SettingsSection("REPRODUCCIÓN") {
+                    SettingRow(Icons.Default.Speed, "Velocidad", "Velocidad de reproducción persistente") { Text("${Prefs.speed(context)}x", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp) }
                     SettingRow(Icons.Default.QueueMusic, "Gapless", "Evita pausas entre pistas compatibles") {
-                        Switch(
-                            checked = Prefs.gapless(context) || FeaturePrefs.get(context, "extra.gapless"),
-                            onCheckedChange = { Prefs.setGapless(context, it); FeaturePrefs.set(context, "extra.gapless", it) }
-                        )
+                        Switch(checked = Prefs.gapless(context) || FeaturePrefs.get(context, "extra.gapless"), onCheckedChange = { Prefs.setGapless(context, it); FeaturePrefs.set(context, "extra.gapless", it) })
                     }
-                    SettingRow(Icons.Default.Info, "Versión", "1.5.0 · Liquid Glass build") {}
-                    SettingRow(Icons.Default.Bolt, "Motor", "Media3 / ExoPlayer") {}
+                    SettingRow(Icons.Default.Download, "Descarga automática", "Al pegar un enlace de YouTube, guárdalo en Supabase") { FeatureSwitch(context, "extra.auto_download", true) }
+                    SettingRow(Icons.Default.Lyrics, "Letras automáticas", "Carga letras al abrir el reproductor") { FeatureSwitch(context, "extra.auto_lyrics", true) }
+                }
+            }
+            item {
+                SettingsSection("PRIVACIDAD · 20 CONTROLES") {
+                    FeaturePrefs.privacy.forEach { (key, title, subtitle) ->
+                        SettingRow(Icons.Default.Info, title, subtitle) { FeatureSwitch(context, key) }
+                    }
+                }
+            }
+            item {
+                SettingsSection("PERSONALIZACIÓN · 30 CONTROLES") {
+                    FeaturePrefs.customization.forEach { (key, title, subtitle) ->
+                        SettingRow(Icons.Default.Settings, title, subtitle) { FeatureSwitch(context, key) }
+                    }
+                }
+            }
+            item {
+                SettingsSection("EXPERIMENTAL · 20 CONTROLES") {
+                    FeaturePrefs.experimental.forEach { (key, title, subtitle) ->
+                        SettingRow(Icons.Default.Bolt, title, subtitle) { FeatureSwitch(context, key) }
+                    }
+                }
+            }
+            item {
+                SettingsSection("MÁS FUNCIONES · 60 CONTROLES") {
+                    FeaturePrefs.extra.forEach { (key, title, subtitle) ->
+                        SettingRow(Icons.Default.Cached, title, subtitle) { FeatureSwitch(context, key) }
+                    }
+                }
+            }
+            item {
+                SettingsSection("ACERCA DE") {
+                    SettingRow(Icons.Default.Info, "KokoroFy", "1.8.0 · Liquid Glass / Seki / Supabase") {}
+                    SettingRow(Icons.Default.MusicNote, "Motor de audio", "Media3 / ExoPlayer") {}
                 }
             }
         }
@@ -1556,8 +1667,16 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
 @Composable
 private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column {
-        Text(title.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
-        GlassCard(Modifier.fillMaxWidth(), dark = MaterialTheme.colorScheme.background == Ink, content = content)
+        Text(title, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = .6.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 5.dp, bottom = 8.dp))
+        LiquidGlass(
+            modifier = Modifier.fillMaxWidth(),
+            dark = MaterialTheme.colorScheme.background.luminance() < 0.5f,
+            corner = RoundedCornerShape(22.dp),
+            interactive = false,
+            intensity = .42f
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), content = content)
+        }
     }
 }
 
@@ -1575,8 +1694,8 @@ private fun SettingRow(
         Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(23.dp))
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
         trailing()
     }
