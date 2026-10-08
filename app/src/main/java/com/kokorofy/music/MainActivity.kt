@@ -9,6 +9,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.CircularProgressIndicator
 
 import android.content.ComponentName
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -743,37 +746,55 @@ private fun RowScope.QuickHomeAction(
     label: String,
     tint: Color
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .72f),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.height(52.dp).weight(1f)
+    val dark = MaterialTheme.colorScheme.background == Ink
+    Row(
+        Modifier
+            .height(52.dp)
+            .weight(1f)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (dark) Color.White.copy(0.08f) else Color(0xFFF2F2F7))
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
     ) {
-        Row(
-            Modifier.fillMaxSize().padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(19.dp))
-            Spacer(Modifier.width(7.dp))
-            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        }
+        Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(7.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
 @Composable
 private fun AlbumCard(song: Song, dark: Boolean, onPlay: (Song) -> Unit) {
     Column(
-        Modifier.width(145.dp).clickable { onPlay(song) }
+        Modifier
+            .width(148.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onPlay(song) }
     ) {
         AsyncImage(
             model = song.coverUrl ?: R.drawable.kokorofy_icon,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.size(145.dp).clip(RoundedCornerShape(18.dp))
+            modifier = Modifier
+                .size(148.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .shadow(6.dp, RoundedCornerShape(16.dp))
         )
-        Spacer(Modifier.height(8.dp))
-        Text(song.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(song.artist, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            song.title,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            song.artist,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -869,8 +890,14 @@ private fun SearchScreen(
 
 @Composable
 private fun SearchHint(text: String) {
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .75f), shape = RoundedCornerShape(999.dp)) {
-        Text(text, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    val dark = MaterialTheme.colorScheme.background == Ink
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (dark) Color.White.copy(0.12f) else Color(0xFFE8E8ED))
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -881,23 +908,44 @@ private fun LibraryScreen(
     onPlay: (Song) -> Unit,
     onDownload: (Song) -> Unit
 ) {
+    val context = LocalContext.current
+    var showEditor by remember { mutableStateOf(false) }
+    if (showEditor) {
+        PlaylistEditorSheet(
+            context = context,
+            playlistId = null,
+            onDismiss = { showEditor = false },
+            onSaved = { showEditor = false }
+        )
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Text("Biblioteca", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.8).sp)
-            Text("Todo lo que guardas en KokoroFy", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Biblioteca", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1).sp)
+            Text("${songs.size} canciones en tu dispositivo", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LibraryPill(Icons.Default.Download, "Descargas")
-                LibraryPill(Icons.Default.FavoriteBorder, "Favoritos")
+                LibraryTile(Icons.Default.Download, "Descargas", "Offline", dark, Modifier.weight(1f))
+                LibraryTile(Icons.Default.Favorite, "Favoritos", "Liked", dark, Modifier.weight(1f))
             }
         }
         item {
-            Text("Canciones", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.weight(1f).clickable { showEditor = true }) {
+                    LibraryTile(Icons.Default.QueueMusic, "Playlists", "Crear / editar", dark, Modifier.fillMaxWidth())
+                }
+                LibraryTile(Icons.Default.Album, "Álbumes", "Por portada", dark, Modifier.weight(1f))
+            }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Canciones", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                Text("Recientes", fontSize = 12.sp, color = SpotifyGreen, fontWeight = FontWeight.SemiBold)
+            }
         }
         if (songs.isEmpty()) {
             item { EmptyState("Todavía no tienes canciones guardadas.") }
@@ -908,13 +956,35 @@ private fun LibraryScreen(
 }
 
 @Composable
-private fun RowScope.LibraryPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
-    GlassCard(Modifier.weight(1f), dark = MaterialTheme.colorScheme.background == Ink) {
-        Icon(icon, null, tint = SpotifyGreen)
-        Spacer(Modifier.height(8.dp))
-        Text(label, fontWeight = FontWeight.Bold)
+private fun LibraryTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    dark: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                if (dark) Color.White.copy(0.08f) else Color(0xFFF2F2F7)
+            )
+            .border(
+                1.dp,
+                if (dark) Color.White.copy(0.08f) else Color.Black.copy(0.04f),
+                RoundedCornerShape(16.dp)
+            )
+            .padding(16.dp)
+    ) {
+        Column {
+            Icon(icon, null, tint = SpotifyGreen, modifier = Modifier.size(26.dp))
+            Spacer(Modifier.height(12.dp))
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
+
 
 @Composable
 private fun TrackRow(
@@ -923,32 +993,39 @@ private fun TrackRow(
     onPlay: (Song) -> Unit,
     onDownload: (Song) -> Unit
 ) {
-    LiquidGlass(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        dark = dark,
-        corner = RoundedCornerShape(18.dp),
-        interactive = true,
-        intensity = 0.62f
-    ) {
     Row(
-        Modifier.fillMaxWidth()
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                if (dark) Color.White.copy(alpha = 0.06f)
+                else Color.Black.copy(alpha = 0.04f)
+            )
             .clickable { onPlay(song) }
-            .padding(horizontal = 8.dp, vertical = 7.dp),
+            .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
             model = song.coverUrl ?: R.drawable.kokorofy_icon,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.size(58.dp).clip(RoundedCornerShape(10.dp))
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .shadow(2.dp, RoundedCornerShape(10.dp))
         )
-        Spacer(Modifier.width(13.dp))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(song.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "${song.artist} • ${song.album}",
+                song.title,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                listOf(song.artist, song.album).filter { it.isNotBlank() }.joinToString(" · "),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 maxLines = 1,
@@ -958,7 +1035,6 @@ private fun TrackRow(
         IconButton(onClick = { onDownload(song) }) {
             Icon(Icons.Default.Download, "Descargar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-    }
     }
 }
 
@@ -1586,14 +1662,20 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
                 Spacer(Modifier.height(14.dp))
                 // Profile: photo, name, username
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val pickImage = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.GetContent()
+                    ) { uri: Uri? ->
+                        if (uri != null) {
+                            avatarUri = uri.toString()
+                            ProfilePrefs.setAvatarUri(context, uri.toString())
+                        }
+                    }
                     Box(
                         Modifier
-                            .size(64.dp)
+                            .size(72.dp)
                             .clip(CircleShape)
                             .background(SpotifyGreen.copy(alpha = 0.18f))
-                            .clickable {
-                                // Placeholder: user can paste content URI later via settings
-                            },
+                            .clickable { pickImage.launch("image/*") },
                         contentAlignment = Alignment.Center
                     ) {
                         if (!avatarUri.isNullOrBlank()) {
@@ -1604,7 +1686,10 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
-                            Icon(Icons.Default.Person, null, tint = SpotifyGreen, modifier = Modifier.size(32.dp))
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.Person, null, tint = SpotifyGreen, modifier = Modifier.size(28.dp))
+                                Text("Foto", fontSize = 10.sp, color = SpotifyGreen)
+                            }
                         }
                     }
                     Spacer(Modifier.width(14.dp))
@@ -1697,17 +1782,30 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
 
 @Composable
 private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Column {
-        Text(title, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = .6.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 5.dp, bottom = 8.dp))
-        LiquidGlass(
-            modifier = Modifier.fillMaxWidth(),
-            dark = MaterialTheme.colorScheme.background.luminance() < 0.5f,
-            corner = RoundedCornerShape(22.dp),
-            interactive = false,
-            intensity = .42f
-        ) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), content = content)
-        }
+        Text(
+            title,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.4.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+        // iOS-style group: solid surface, high contrast text (no broken glass washout)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (dark) Color(0xFF1C1C1E) else Color.White)
+                .border(
+                    1.dp,
+                    if (dark) Color.White.copy(0.08f) else Color.Black.copy(0.06f),
+                    RoundedCornerShape(16.dp)
+                )
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            content = content
+        )
     }
 }
 
@@ -1796,6 +1894,99 @@ private fun EmptyState(text: String) {
         Spacer(Modifier.height(10.dp))
         Text(text, fontWeight = FontWeight.Bold)
         Text("Cuando agregues canciones aparecerán aquí.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+    }
+}
+
+
+
+@Composable
+private fun PlaylistEditorSheet(
+    context: android.content.Context,
+    playlistId: String?,
+    onDismiss: () -> Unit,
+    onSaved: (String) -> Unit
+) {
+    val id = playlistId ?: java.util.UUID.randomUUID().toString()
+    var name by remember { mutableStateOf("Nueva playlist") }
+    var desc by remember { mutableStateOf(PlaylistStyle.description(context, id)) }
+    var accent by remember { mutableStateOf(PlaylistStyle.accent(context, id)) }
+    var shuffle by remember { mutableStateOf(PlaylistStyle.shuffleOnOpen(context, id)) }
+    val scope = rememberCoroutineScope()
+    val repo = remember { CatalogRepository(context) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(if (dark) Color(0xFF1C1C1E) else Color.White)
+                .padding(22.dp)
+        ) {
+            Text("Personalizar playlist", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.height(14.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Nombre") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = desc,
+                onValueChange = { desc = it },
+                label = { Text("Descripción") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(14.dp))
+            Text("Color de acento", fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                PlaylistStyle.accentPalette.forEach { colorLong ->
+                    val selected = accent == colorLong
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(colorLong))
+                            .border(
+                                width = if (selected) 3.dp else 0.dp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                shape = CircleShape
+                            )
+                            .clickable { accent = colorLong }
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Reproducir aleatorio al abrir", modifier = Modifier.weight(1f))
+                Switch(checked = shuffle, onCheckedChange = { shuffle = it })
+            }
+            Spacer(Modifier.height(18.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        PlaylistStyle.setAccent(context, id, accent)
+                        PlaylistStyle.setDescription(context, id, desc)
+                        PlaylistStyle.setShuffleOnOpen(context, id, shuffle)
+                        repo.upsertPlaylist(
+                            Playlist(id = id, name = name.trim().ifBlank { "Playlist" })
+                        )
+                        onSaved(id)
+                        onDismiss()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("Guardar")
+            }
+        }
     }
 }
 
