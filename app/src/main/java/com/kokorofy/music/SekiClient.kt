@@ -40,8 +40,31 @@ object SekiClient {
             .create(SekiApi::class.java)
     }
 
-    private fun normalizedQuery(query: String): String =
-        query.trim().replace(Regex("\\s+"), " ")
+    private fun normalizedQuery(query: String): String {
+        val raw = query.trim().replace(Regex("\\s+"), " ")
+        extractYoutubeId(raw)?.let { id ->
+            return "https://www.youtube.com/watch?v=$id"
+        }
+        return raw
+    }
+
+    fun extractYoutubeId(input: String): String? {
+        val str = input.trim()
+        val patterns = listOf(
+            Regex(
+                "(?:youtube\\.com/(?:watch\\?.*?v=|embed/|v/|shorts/|live/)|youtu\\.be/|music\\.youtube\\.com/watch\\?.*?v=)([\\w-]{11})",
+                RegexOption.IGNORE_CASE
+            ),
+            Regex("[?&]v=([\\w-]{11})", RegexOption.IGNORE_CASE),
+            Regex("^([\\w-]{11})$")
+        )
+        for (re in patterns) {
+            val m = re.find(str) ?: continue
+            val id = m.groupValues.getOrNull(1) ?: continue
+            if (id.length == 11) return id
+        }
+        return null
+    }
 
     suspend fun health(): Boolean = withContext(Dispatchers.IO) {
         runCatching {
