@@ -11,7 +11,9 @@ import org.json.JSONArray
 import java.util.concurrent.TimeUnit
 
 class CatalogRepository(context: Context) {
-    private val dao = AppDatabase.get(context).songDao()
+    private val db = AppDatabase.get(context)
+    private val dao = db.songDao()
+    private val playlistDao = db.playlistDao()
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -26,6 +28,13 @@ class CatalogRepository(context: Context) {
     suspend fun upsertAll(list: List<Song>) = withContext(Dispatchers.IO) {
         if (list.isNotEmpty()) dao.upsertAll(list)
     }
+
+    suspend fun upsertPlaylist(playlist: Playlist) = withContext(Dispatchers.IO) {
+        playlistDao.upsert(playlist)
+    }
+
+    val playlists = playlistDao.observePlaylists()
+
 
     /**
      * Siempre vuelve a pedir el catálogo a Supabase.
