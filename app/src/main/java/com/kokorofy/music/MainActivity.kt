@@ -1647,17 +1647,25 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
     var avatarUri by remember { mutableStateOf(ProfilePrefs.avatarUri(context)) }
 
     Dialog(onDismissRequest = onClose) {
-        LiquidGlass(
-            modifier = Modifier.fillMaxWidth(),
-            dark = MaterialTheme.colorScheme.background == Ink,
-            corner = RoundedCornerShape(28.dp),
-            intensity = 0.95f
+        val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(if (dark) Color(0xFF1C1C1E) else Color.White)
+                .padding(22.dp)
         ) {
-            Column(Modifier.padding(22.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (loggedIn) "Tu cuenta" else if (signUp) "Crear cuenta" else "Iniciar sesión",
-                        fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Cerrar") }
+                    Text(
+                        if (loggedIn) "Tu cuenta" else if (signUp) "Crear cuenta" else "Iniciar sesión",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (dark) Color.White else Color.Black,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Default.Close, "Cerrar", tint = if (dark) Color.White else Color.Black)
+                    }
                 }
                 Spacer(Modifier.height(14.dp))
                 // Profile: photo, name, username
@@ -1722,7 +1730,10 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
                 if (loggedIn) {
                     Text(repo.state().email.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(18.dp))
-                    Text("Tus playlists, historial local y preferencias siguen guardados en este dispositivo.")
+                    Text(
+                        "Tus playlists, historial local y preferencias siguen guardados en este dispositivo.",
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                     Spacer(Modifier.height(18.dp))
                     Button(
                         onClick = {
@@ -1775,7 +1786,6 @@ private fun AccountSheet(context: android.content.Context, onClose: () -> Unit) 
                         Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-            }
         }
     }
 }
