@@ -687,8 +687,7 @@ private fun HomeScreen(
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    "Tu música,
-exactamente como quieres.",
+                    "Tu música, exactamente como quieres.",
                     fontSize = 31.sp,
                     lineHeight = 34.sp,
                     fontWeight = FontWeight.ExtraBold,
